@@ -1,0 +1,33 @@
+name: Daily Database Health Check
+
+on:
+  schedule:
+    # 18:30 UTC = 12:00 AM IST (Indian Standard Time)
+    - cron: '30 18 * * *'
+    # 00:00 UTC = 12:00 AM UTC
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  db-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install django dj-database-url psycopg2-binary djangorestframework django-cors-headers djangorestframework-simplejwt whitenoise
+
+      - name: Run Database Check Ping
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://postgres:Faroz%409565%23123@db.jhwzdsgqstlowvuxpzyf.supabase.co:5432/postgres?sslmode=require' }}
+          SECRET_KEY: 'ci-secret-key-check'
+        run: |
+          python manage.py db_check
