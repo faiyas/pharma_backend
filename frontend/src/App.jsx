@@ -402,6 +402,16 @@ export default function App() {
     }, 4500);
   }
 
+  // Keep-alive heartbeat: ping backend every 30 seconds to prevent Render free tier spin-down
+  useEffect(() => {
+    const keepAlive = () => {
+      fetch(`${API_BASE}/health/`, { method: 'GET', keepalive: true }).catch(() => {});
+    };
+    keepAlive();
+    const interval = setInterval(keepAlive, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
   // Initial load
   useEffect(() => {
     const token = localStorage.getItem('access');
