@@ -267,7 +267,7 @@ class Evidence(APIView):
             except ValueError:
                 pass
 
-        events = q.order_by("-created_at")[:500]
+        events = q.order_by("-created_at")[:2000]
         return Response([
             {
                 "id": x.id,

@@ -393,16 +393,14 @@ export default function App() {
   const [filterDate, setFilterDate] = useState('');
   const [filterStartDate, setFilterStartDate] = useState('');
   const [filterEndDate, setFilterEndDate] = useState('');
-  const [filterMonth, setFilterMonth] = useState('');
+  const [filterMonth, setFilterMonth] = useState(new Date().toISOString().slice(0, 7));
   const [filterDayOfWeek, setFilterDayOfWeek] = useState('');
   const [evidenceFilterStatus, setEvidenceFilterStatus] = useState('all');
 
-  // Modals: Manager Password Reset & Evidence Purge
+  // Modals: Manager Password Reset
   const [resetManagerModal, setResetManagerModal] = useState(null);
   const [resetManagerPass, setResetManagerPass] = useState('');
   const [isResettingPass, setIsResettingPass] = useState(false);
-  const [showPurgeModal, setShowPurgeModal] = useState(false);
-  const [purgeMonth, setPurgeMonth] = useState(new Date().toISOString().slice(0, 7));
   const [isPurgingEvidence, setIsPurgingEvidence] = useState(false);
 
   // Toasts
@@ -453,8 +451,9 @@ export default function App() {
       const att = await apiReq('/attendance/').catch(() => []);
       setAttendanceRows(att);
 
-      // Load evidence
-      const ev = await apiReq('/attendance/evidence/').catch(() => []);
+      // Load evidence (strictly scoped to target month)
+      const targetMo = filterMonth || new Date().toISOString().slice(0, 7);
+      const ev = await apiReq(`/attendance/evidence/?month=${targetMo}`).catch(() => []);
       setEvidenceList(ev);
 
       // If employee, load today punch status
@@ -832,27 +831,265 @@ export default function App() {
     }
   }
 
-  // Manager or Super Admin: Purge Evidence Photos
-  async function handlePurgeEvidence() {
-    if (!purgeMonth) {
-      addToast('Please select a valid month to purge.', 'warning');
+  // Helper: Month-End Verification & Availability Check
+  function getMonthEndStatus(monthStr) {
+    const target = monthStr || new Date().toISOString().slice(0, 7);
+    const parts = target.split('-');
+    if (parts.length !== 2) return { isAvailable: false, reason: 'Invalid month' };
+    const yr = parseInt(parts[0], 10);
+    const mo = parseInt(parts[1], 10);
+    if (isNaN(yr) || isNaN(mo)) return { isAvailable: false, reason: 'Invalid month' };
+
+    const lastDayDate = new Date(yr, mo, 0);
+    const lastDayNum = lastDayDate.getDate();
+    const lastDayFormatted = lastDayDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+
+    const now = new Date();
+    const currentYr = now.getFullYear();
+    const currentMo = now.getMonth() + 1;
+    const currentDay = now.getDate();
+
+    // Past month: Already concluded, available for audit & purge anytime
+    if (yr < currentYr || (yr === currentYr && mo < currentMo)) {
+      return { isAvailable: true, isPast: true, lastDay: lastDayNum, lastDayFormatted };
+    }
+
+    // Current month: Strictly available on the final day of the month (e.g. 31st or 30th)
+    if (yr === currentYr && mo === currentMo) {
+      if (currentDay >= lastDayNum) {
+        return { isAvailable: true, isCurrentMonthEnd: true, lastDay: lastDayNum, lastDayFormatted };
+      } else {
+        const daysLeft = lastDayNum - currentDay;
+        return {
+          isAvailable: false,
+          reason: `Auto-purge unlocks on month end (${lastDayFormatted}). Attendance evidence is preserved during active shifts.`,
+          daysLeft,
+          lastDayFormatted,
+        };
+      }
+    }
+
+    return { isAvailable: false, reason: 'Future month has not completed yet.' };
+  }
+
+  // Generate Standalone Offline HTML Audit Dossier with Embedded Photos
+  function generateAuditDossierHTML(records, targetMonth) {
+    const totalCount = records.length;
+    const acceptedCount = records.filter((r) => r.accepted).length;
+    const rejectedCount = records.filter((r) => !r.accepted).length;
+    const rate = totalCount ? ((acceptedCount / totalCount) * 100).toFixed(1) : '100.0';
+    const generatedAt = new Date().toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'medium' });
+    const monthName = new Date(`${targetMonth}-01T00:00:00`).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    const auditorName = user.full_name || user.first_name || user.username;
+
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PharmaTrack Audit Dossier - ${targetMonth}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f8fafc; color: #0f172a; padding: 32px 20px; line-height: 1.5; }
+    .container { max-width: 1200px; margin: 0 auto; background: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; box-shadow: 0 4px 20px rgba(0,0,0,0.06); padding: 32px; }
+    .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #e2e8f0; padding-bottom: 24px; margin-bottom: 24px; gap: 20px; flex-wrap: wrap; }
+    .brand-title { font-size: 24px; font-weight: 800; color: #059669; letter-spacing: -0.02em; }
+    .doc-subtitle { font-size: 14px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; margin-top: 4px; }
+    .meta-box { background: #f1f5f9; padding: 12px 18px; border-radius: 10px; font-size: 13px; text-align: right; }
+    .meta-box div { margin-bottom: 4px; }
+    .meta-box strong { color: #0f172a; }
+    .print-btn { background: #059669; color: white; border: none; padding: 10px 18px; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 14px; display: inline-flex; align-items: center; gap: 8px; }
+    .print-btn:hover { background: #047857; }
+    .stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 28px; }
+    .stat-card { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+    .stat-card .lbl { font-size: 12px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; }
+    .stat-card .val { font-size: 26px; font-weight: 800; color: #0f172a; margin-top: 4px; }
+    .stat-card .val.green { color: #059669; }
+    .stat-card .val.red { color: #dc2626; }
+    .records-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 20px; }
+    .record-card { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 2px 6px rgba(0,0,0,0.03); }
+    .record-img-box { position: relative; height: 260px; background: #0f172a; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    .record-img-box img { width: 100%; height: 100%; object-fit: cover; }
+    .badge { position: absolute; top: 12px; right: 12px; padding: 4px 10px; border-radius: 9999px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+    .badge-success { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
+    .badge-danger { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+    .record-body { padding: 16px; flex: 1; display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
+    .record-title { display: flex; justify-content: space-between; align-items: baseline; font-weight: 700; font-size: 15px; border-bottom: 1px solid #f1f5f9; padding-bottom: 8px; }
+    .record-row { display: flex; justify-content: space-between; }
+    .record-lbl { color: #64748b; }
+    .record-val { font-weight: 600; color: #0f172a; text-align: right; }
+    .footer { margin-top: 40px; border-top: 2px solid #e2e8f0; padding-top: 24px; font-size: 12px; color: #64748b; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
+    .sign-block { width: 240px; border-top: 1px solid #94a3b8; padding-top: 6px; margin-top: 30px; text-align: center; font-weight: 600; font-size: 12px; color: #475569; }
+    @media print {
+      body { background: #ffffff; padding: 0; }
+      .container { border: none; box-shadow: none; padding: 0; max-width: 100%; }
+      .print-btn { display: none; }
+      .record-card { break-inside: avoid; page-break-inside: avoid; margin-bottom: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div>
+        <div class="brand-title">PharmaTrack Geofence Verification</div>
+        <div class="doc-subtitle">Official Month-End Audit & Biometric Evidence Dossier</div>
+        <div style="font-size: 14px; margin-top: 8px; font-weight: 600; color: #334155;">
+          Audit Period: <span style="color: #059669;">${monthName} (${targetMonth})</span>
+        </div>
+      </div>
+      <div class="meta-box">
+        <div>Generated: <strong>${generatedAt}</strong></div>
+        <div>Auditor: <strong>${auditorName} (${user.role.replace('_', ' ')})</strong></div>
+        <div style="margin-top: 8px;">
+          <button onclick="window.print()" class="print-btn">🖨️ Print / Save as PDF</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="stats-row">
+      <div class="stat-card">
+        <div class="lbl">Total Audit Records</div>
+        <div class="val">${totalCount}</div>
+      </div>
+      <div class="stat-card">
+        <div class="lbl">Verified & Accepted</div>
+        <div class="val green">${acceptedCount}</div>
+      </div>
+      <div class="stat-card">
+        <div class="lbl">Violations / Rejected</div>
+        <div class="val red">${rejectedCount}</div>
+      </div>
+      <div class="stat-card">
+        <div class="lbl">Geofence Compliance</div>
+        <div class="val green">${rate}%</div>
+      </div>
+    </div>
+
+    <div class="records-grid">
+      ${records.map((r) => `
+        <div class="record-card">
+          <div class="record-img-box">
+            ${r.selfie ? `<img src="${r.selfie}" alt="Biometric Selfie" />` : `<div style="color: #94a3b8; font-size: 12px;">Photo previously purged</div>`}
+            <span class="badge ${r.accepted ? 'badge-success' : 'badge-danger'}">
+              ${r.accepted ? '✓ Accepted' : '✕ Rejected'}
+            </span>
+          </div>
+          <div class="record-body">
+            <div class="record-title">
+              <span>${r.employee_name || r.employee}</span>
+              <span style="font-size: 12px; color: #64748b;">${r.kind.replace('_', ' ')}</span>
+            </div>
+            <div class="record-row">
+              <span class="record-lbl">Staff ID</span>
+              <span class="record-val" style="font-family: monospace;">${r.employee}</span>
+            </div>
+            <div class="record-row">
+              <span class="record-lbl">Pharmacy Branch</span>
+              <span class="record-val">${r.shop} (${r.shop_code})</span>
+            </div>
+            <div class="record-row">
+              <span class="record-lbl">Timestamp</span>
+              <span class="record-val">${new Date(r.time).toLocaleString()}</span>
+            </div>
+            <div class="record-row">
+              <span class="record-lbl">Distance from Branch</span>
+              <span class="record-val">${Number(r.distance_m).toFixed(1)} meters</span>
+            </div>
+            <div class="record-row">
+              <span class="record-lbl">GPS Accuracy</span>
+              <span class="record-val">±${Number(r.accuracy_m).toFixed(1)}m</span>
+            </div>
+            ${r.reason ? `
+            <div class="record-row" style="color: ${r.accepted ? '#065f46' : '#991b1b'}; margin-top: 4px;">
+              <span class="record-lbl">Audit Note</span>
+              <span class="record-val">${r.reason}</span>
+            </div>` : ''}
+          </div>
+        </div>
+      `).join('')}
+    </div>
+
+    <div class="footer">
+      <div>
+        <p>This report contains authenticated biometric selfies, timestamps, and geospatial coordinates.</p>
+        <p>© ${new Date().getFullYear()} 1103techstudios. All rights reserved.</p>
+      </div>
+      <div>
+        <div class="sign-block">
+          Authorized Auditor Signature / Date
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>`;
+  }
+
+  // Manager or Super Admin: Month-End Export Audit Dossier & Auto-Purge Evidence
+  async function handleExportAuditPackageAndPurge(targetMonth) {
+    const month = targetMonth || filterMonth || new Date().toISOString().slice(0, 7);
+    const status = getMonthEndStatus(month);
+    if (!status.isAvailable) {
+      addToast(status.reason || 'Auto-purge is available only at month end.', 'warning');
       return;
     }
 
-    const confirmMsg = `⚠️ CAUTION: Purge Evidence Photos for ${purgeMonth}?\n\nThis will permanently delete the heavy selfie photos for this month to save storage space.\n\nAll numerical attendance hours, check-in/out times, and dates remain 100% preserved.`;
-    if (!window.confirm(confirmMsg)) return;
-
     setIsPurgingEvidence(true);
     try {
-      const res = await apiReq('/attendance/evidence/purge/', {
+      // 1. Fetch complete records with photos for target month
+      const evidenceData = await apiReq(
+        `/attendance/evidence/?month=${month}${filterShop ? `&shop_id=${filterShop}` : ''}`
+      );
+
+      if (!evidenceData || !evidenceData.length) {
+        addToast(`No evidence records found for ${month} to export.`, 'info');
+        setIsPurgingEvidence(false);
+        return;
+      }
+
+      const photosCount = evidenceData.filter((r) => !!r.selfie).length;
+      const confirmMsg =
+        `📋 MONTH-END AUDIT EXPORT & AUTO-PURGE (${month})\n\n` +
+        `• Total Records: ${evidenceData.length} verification events\n` +
+        `• Active Photos: ${photosCount} selfie images\n\n` +
+        `1. An offline Audit Dossier (.html) with ALL images embedded will be downloaded to your device.\n` +
+        `2. Database selfie photos for ${month} will be AUTOMATICALLY purged immediately after export to free storage.\n` +
+        `3. All attendance hours, timestamps, and GPS logs remain 100% permanently preserved.\n\n` +
+        `Proceed with Export & Auto-Purge?`;
+
+      if (!window.confirm(confirmMsg)) {
+        setIsPurgingEvidence(false);
+        return;
+      }
+
+      // 2. Generate and download HTML dossier with embedded images
+      const htmlContent = generateAuditDossierHTML(evidenceData, month);
+      const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `PharmaTrack_Audit_Dossier_${month}.html`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      // 3. Automatically purge from database now that export is secured
+      const purgeRes = await apiReq('/attendance/evidence/purge/', {
         method: 'POST',
-        body: JSON.stringify({ month: purgeMonth, ...(filterShop ? { shop_id: filterShop } : {}) }),
+        body: JSON.stringify({ month, ...(filterShop ? { shop_id: filterShop } : {}) }),
       });
-      addToast(res.detail, 'success');
-      setShowPurgeModal(false);
+
+      addToast(
+        `Audit Dossier downloaded! ${purgeRes.purged_count || 0} evidence photos have been automatically purged from database.`,
+        'success'
+      );
+
+      // 4. Reload latest data
       await loadAllData(user);
     } catch (err) {
-      addToast(err.message, 'error');
+      addToast(err.message || 'Export or purge failed.', 'error');
     } finally {
       setIsPurgingEvidence(false);
     }
@@ -1206,23 +1443,20 @@ export default function App() {
     if (evidenceFilterStatus === 'rejected' && ev.accepted) return false;
 
     const evDate = (ev.time || '').slice(0, 10);
+    // User requested: Evidence strictly shows selected month
+    const targetMonth = filterMonth || new Date().toISOString().slice(0, 7);
+    if (!evDate.startsWith(targetMonth)) return false;
+
     if (filterDayOfWeek && evDate) {
       const d = new Date(evDate);
       const dayName = d.toLocaleDateString('en-US', { weekday: 'long' });
       if (dayName !== filterDayOfWeek) return false;
     }
 
-    if (filterDateMode === 'single' && filterDate) {
-      if (evDate !== filterDate) return false;
-    } else if (filterDateMode === 'range') {
-      if (filterStartDate && evDate < filterStartDate) return false;
-      if (filterEndDate && evDate > filterEndDate) return false;
-    } else if (filterDateMode === 'month' && filterMonth) {
-      if (!evDate.startsWith(filterMonth)) return false;
-    }
-
     return true;
   });
+
+  const monthEndStatus = getMonthEndStatus(filterMonth);
 
   // --------------------------------------------------------------------------
   // RENDER: Authenticated Dashboard
@@ -1247,9 +1481,9 @@ export default function App() {
         <div className="sidebar-header">
           <div
             className="sidebar-brand"
-            onClick={() => isSidebarCollapsed && setIsSidebarCollapsed(false)}
-            style={{ cursor: isSidebarCollapsed ? 'pointer' : 'default' }}
-            title={isSidebarCollapsed ? 'Click to expand sidebar' : ''}
+            onClick={() => setIsSidebarCollapsed((prev) => !prev)}
+            style={{ cursor: 'pointer' }}
+            title={isSidebarCollapsed ? 'Click logo to expand sidebar' : 'Click logo to collapse sidebar'}
           >
             <img src={pharmaLogo} alt="PharmaTrack" className="brand-logo-img" />
             <div className="brand-text">
@@ -1257,23 +1491,6 @@ export default function App() {
               <span>Attendance Hub</span>
             </div>
           </div>
-
-          {/* Desktop Collapse / Expand Toggle */}
-          <button
-            type="button"
-            className="collapse-toggle-btn desktop-only"
-            onClick={() => setIsSidebarCollapsed((prev) => !prev)}
-            title={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            aria-label={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-              {isSidebarCollapsed ? (
-                <polyline points="9 18 15 12 9 6" />
-              ) : (
-                <polyline points="15 18 9 12 15 6" />
-              )}
-            </svg>
-          </button>
 
           {/* Mobile Close Button */}
           <button
@@ -1353,20 +1570,12 @@ export default function App() {
         {/* Mobile Top Header (Visible on Mobile Devices) */}
         <header className="mobile-top-bar">
           <div className="mobile-top-left">
-            <button
-              type="button"
-              className="mobile-hamburger-btn"
+            <div
+              className="mobile-bar-brand"
               onClick={() => setIsMobileSidebarOpen(true)}
-              aria-label="Open Navigation Menu"
+              style={{ cursor: 'pointer' }}
+              title="Tap logo to open navigation menu"
             >
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="3" y1="6" x2="21" y2="6" />
-                <line x1="3" y1="12" x2="21" y2="12" />
-                <line x1="3" y1="18" x2="21" y2="18" />
-              </svg>
-            </button>
-
-            <div className="mobile-bar-brand" onClick={() => setIsMobileSidebarOpen(true)}>
               <img src={pharmaLogo} alt="PharmaTrack" className="brand-logo-img xs" />
               <span className="mobile-bar-title">{currentTabObj?.label || 'PharmaTrack'}</span>
             </div>
@@ -1399,7 +1608,11 @@ export default function App() {
         {/* Desktop Top Header Bar */}
         <header className="desktop-top-bar">
           <div className="top-bar-left">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div
+              style={{ display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer' }}
+              onClick={() => setIsSidebarCollapsed((prev) => !prev)}
+              title="Click logo to toggle sidebar"
+            >
               <img src={pharmaLogo} alt="PharmaTrack" className="brand-logo-img xs" />
               <div>
                 <h2 className="top-bar-page-title">{currentTabObj?.label || 'Dashboard'}</h2>
@@ -1895,85 +2108,135 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="table-mobile-hint">
-                <span>⇄ Swipe horizontally to view full table</span>
-              </div>
-              <div className="table-responsive">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Branch Code</th>
-                      <th>Name & Address</th>
-                      <th>Coordinates</th>
-                      <th>Geofence</th>
-                      <th>Staff Count</th>
-                      <th>Assigned Managers</th>
-                      <th>Actions</th>
+            <div className="table-responsive desktop-only">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Branch Code</th>
+                    <th>Name & Address</th>
+                    <th>Coordinates</th>
+                    <th>Geofence</th>
+                    <th>Staff Count</th>
+                    <th>Assigned Managers</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {shops.map((s) => (
+                    <tr key={s.id}>
+                      <td>
+                        <span className="badge badge-primary">{s.code}</span>
+                      </td>
+                      <td>
+                        <strong>{s.name}</strong>
+                        <div style={{ fontSize: 12, color: 'var(--slate-500)' }}>{s.address}</div>
+                      </td>
+                      <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>
+                        {s.latitude?.toFixed(5)}, {s.longitude?.toFixed(5)}
+                      </td>
+                      <td>
+                        <strong>{s.allowed_radius_m}m</strong>
+                      </td>
+                      <td>
+                        <span className="badge badge-neutral">{s.employee_count || 0} employees</span>
+                      </td>
+                      <td>
+                        {s.managers?.length ? (
+                          s.managers.map((m) => (
+                            <span key={m} className="badge badge-success" style={{ marginRight: 4 }}>
+                              {m}
+                            </span>
+                          ))
+                        ) : (
+                          <span style={{ fontSize: 12, color: 'var(--slate-400)' }}>None</span>
+                        )}
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-sm"
+                            onClick={() => {
+                              setAddStaffModalShop(s);
+                              setAddStaffCount(1);
+                            }}
+                          >
+                            + Add Staff
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => viewShopRoster(s)}
+                          >
+                            View Staff
+                          </button>
+                        </div>
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {shops.map((s) => (
-                      <tr key={s.id}>
-                        <td>
-                          <span className="badge badge-primary">{s.code}</span>
-                        </td>
-                        <td>
-                          <strong>{s.name}</strong>
-                          <div style={{ fontSize: 12, color: 'var(--slate-500)' }}>{s.address}</div>
-                        </td>
-                        <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>
-                          {s.latitude?.toFixed(5)}, {s.longitude?.toFixed(5)}
-                        </td>
-                        <td>
-                          <strong>{s.allowed_radius_m}m</strong>
-                        </td>
-                        <td>
-                          <span className="badge badge-neutral">{s.employee_count || 0} employees</span>
-                        </td>
-                        <td>
-                          {s.managers?.length ? (
-                            s.managers.map((m) => (
-                              <span key={m} className="badge badge-success" style={{ marginRight: 4 }}>
-                                {m}
-                              </span>
-                            ))
-                          ) : (
-                            <span style={{ fontSize: 12, color: 'var(--slate-400)' }}>None</span>
-                          )}
-                        </td>
-                        <td>
-                          <div style={{ display: 'flex', gap: 6 }}>
-                            <button
-                              type="button"
-                              className="btn btn-primary btn-sm"
-                              onClick={() => {
-                                setAddStaffModalShop(s);
-                                setAddStaffCount(1);
-                              }}
-                            >
-                              + Add Staff
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn-secondary btn-sm"
-                              onClick={() => viewShopRoster(s)}
-                            >
-                              View Staff
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                    {!shops.length && (
-                      <tr>
-                        <td colSpan="7" style={{ textAlign: 'center', padding: 24, color: 'var(--slate-500)' }}>
-                          No pharmacy branches created yet. Use the form above to add your first branch.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                  ))}
+                  {!shops.length && (
+                    <tr>
+                      <td colSpan="7" style={{ textAlign: 'center', padding: 24, color: 'var(--slate-500)' }}>
+                        No pharmacy branches created yet. Use the form above to add your first branch.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile Cards View for Registered Shops */}
+            <div className="mobile-only mobile-cards-list">
+              {shops.map((s) => (
+                <div key={s.id} className="mobile-data-card">
+                  <div className="mobile-card-top">
+                    <div>
+                      <div className="mobile-card-title">{s.name}</div>
+                      <div className="mobile-card-sub">{s.address}</div>
+                    </div>
+                    <span className="badge badge-primary">{s.code}</span>
+                  </div>
+                  <div className="mobile-card-row">
+                    <span className="mobile-card-label">Geofence Radius</span>
+                    <span className="mobile-card-val"><strong>{s.allowed_radius_m}m</strong></span>
+                  </div>
+                  <div className="mobile-card-row">
+                    <span className="mobile-card-label">Staff Count</span>
+                    <span className="mobile-card-val"><span className="badge badge-neutral">{s.employee_count || 0} employees</span></span>
+                  </div>
+                  <div className="mobile-card-row">
+                    <span className="mobile-card-label">Managers</span>
+                    <span className="mobile-card-val">
+                      {s.managers?.length ? s.managers.join(', ') : 'None'}
+                    </span>
+                  </div>
+                  <div className="mobile-card-actions">
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={() => {
+                        setAddStaffModalShop(s);
+                        setAddStaffCount(1);
+                      }}
+                    >
+                      + Add Staff
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => viewShopRoster(s)}
+                    >
+                      View Staff
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {!shops.length && (
+                <div style={{ textAlign: 'center', padding: 24, color: 'var(--slate-500)' }}>
+                  No pharmacy branches created yet.
+                </div>
+              )}
+            </div>
             </div>
           </div>
         )}
@@ -2076,70 +2339,119 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="table-mobile-hint">
-                <span>⇄ Swipe horizontally to view full table</span>
-              </div>
-              <div className="table-responsive">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Manager</th>
-                      <th>Registered Date</th>
-                      <th>Managed Branches</th>
-                      <th>Actions</th>
+            <div className="table-responsive desktop-only">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Manager</th>
+                    <th>Registered Date</th>
+                    <th>Managed Branches</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {managers.map((m) => (
+                    <tr key={m.id}>
+                      <td>
+                        <strong>{m.username}</strong>
+                      </td>
+                      <td>{m.date_joined}</td>
+                      <td>
+                        {m.managed_shops?.length ? (
+                          m.managed_shops.map((s) => (
+                            <span key={s.id} className="badge badge-primary" style={{ marginRight: 6 }}>
+                              {s.code} ({s.name})
+                            </span>
+                          ))
+                        ) : (
+                          <span style={{ fontSize: 12, color: 'var(--slate-400)' }}>No branches assigned</span>
+                        )}
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => {
+                              setResetManagerModal(m);
+                              setResetManagerPass('');
+                            }}
+                          >
+                            🔑 Reset Password
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-outline-danger btn-sm"
+                            onClick={() => handleDeleteManager(m)}
+                          >
+                            🗑️ Delete
+                          </button>
+                        </div>
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {managers.map((m) => (
-                      <tr key={m.id}>
-                        <td>
-                          <strong>{m.username}</strong>
-                        </td>
-                        <td>{m.date_joined}</td>
-                        <td>
-                          {m.managed_shops?.length ? (
-                            m.managed_shops.map((s) => (
-                              <span key={s.id} className="badge badge-primary" style={{ marginRight: 6 }}>
-                                {s.code} ({s.name})
-                              </span>
-                            ))
-                          ) : (
-                            <span style={{ fontSize: 12, color: 'var(--slate-400)' }}>No branches assigned</span>
-                          )}
-                        </td>
-                        <td>
-                          <div style={{ display: 'flex', gap: 6 }}>
-                            <button
-                              type="button"
-                              className="btn btn-secondary btn-sm"
-                              onClick={() => {
-                                setResetManagerModal(m);
-                                setResetManagerPass('');
-                              }}
-                            >
-                              🔑 Reset Password
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn-outline-danger btn-sm"
-                              onClick={() => handleDeleteManager(m)}
-                            >
-                              🗑️ Delete
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                    {!managers.length && (
-                      <tr>
-                        <td colSpan="4" style={{ textAlign: 'center', padding: 24, color: 'var(--slate-500)' }}>
-                          No managers registered yet.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                  ))}
+                  {!managers.length && (
+                    <tr>
+                      <td colSpan="4" style={{ textAlign: 'center', padding: 24, color: 'var(--slate-500)' }}>
+                        No managers registered yet.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile Cards for Managers Directory */}
+            <div className="mobile-only mobile-cards-list">
+              {managers.map((m) => (
+                <div key={m.id} className="mobile-data-card">
+                  <div className="mobile-card-top">
+                    <div>
+                      <div className="mobile-card-title">{m.username}</div>
+                      <div className="mobile-card-sub">Registered: {m.date_joined}</div>
+                    </div>
+                  </div>
+                  <div className="mobile-card-row">
+                    <span className="mobile-card-label">Managed Branches</span>
+                    <span className="mobile-card-val">
+                      {m.managed_shops?.length ? (
+                        m.managed_shops.map((s) => (
+                          <span key={s.id} className="badge badge-primary" style={{ marginRight: 4, display: 'inline-block', marginBottom: 2 }}>
+                            {s.code} ({s.name})
+                          </span>
+                        ))
+                      ) : (
+                        <span style={{ fontSize: 12, color: 'var(--slate-400)' }}>None</span>
+                      )}
+                    </span>
+                  </div>
+                  <div className="mobile-card-actions">
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => {
+                        setResetManagerModal(m);
+                        setResetManagerPass('');
+                      }}
+                    >
+                      🔑 Reset Password
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-outline-danger btn-sm"
+                      onClick={() => handleDeleteManager(m)}
+                    >
+                      🗑️ Delete
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {!managers.length && (
+                <div style={{ textAlign: 'center', padding: 24, color: 'var(--slate-500)' }}>
+                  No managers registered yet.
+                </div>
+              )}
+            </div>
             </div>
           </div>
         )}
@@ -2326,10 +2638,7 @@ export default function App() {
               </div>
             </div>
 
-            <div className="table-mobile-hint">
-              <span>⇄ Swipe horizontally to view full table</span>
-            </div>
-            <div className="table-responsive">
+            <div className="table-responsive desktop-only">
               <table>
                 <thead>
                   <tr>
@@ -2395,6 +2704,56 @@ export default function App() {
                 </tbody>
               </table>
             </div>
+
+            {/* Mobile Card View */}
+            <div className="mobile-only mobile-cards-list">
+              {filteredAttendance.map((row) => {
+                const dayName = new Date(row.date).toLocaleDateString('en-US', { weekday: 'short' });
+                let hoursDisplay = '—';
+                if (row.check_in && row.check_out) {
+                  const diffSec = (new Date(row.check_out) - new Date(row.check_in)) / 1000;
+                  hoursDisplay = `${(Math.max(0, diffSec) / 3600).toFixed(1)} hrs`;
+                }
+                return (
+                  <div key={row.id} className="mobile-data-card">
+                    <div className="mobile-card-top">
+                      <div>
+                        <div className="mobile-card-title">{row.employee_name || row.employee}</div>
+                        <div className="mobile-card-sub">{row.shop} ({row.shop_code})</div>
+                      </div>
+                      {row.check_out ? (
+                        <span className="badge badge-success">Completed</span>
+                      ) : row.check_in ? (
+                        <span className="badge badge-primary">Active Shift</span>
+                      ) : (
+                        <span className="badge badge-neutral">—</span>
+                      )}
+                    </div>
+                    <div className="mobile-card-row">
+                      <span className="mobile-card-label">Work Date</span>
+                      <span className="mobile-card-val">{formatDate(row.date)} ({dayName})</span>
+                    </div>
+                    <div className="mobile-card-row">
+                      <span className="mobile-card-label">Check In</span>
+                      <span className="mobile-card-val">{formatTime(row.check_in)}</span>
+                    </div>
+                    <div className="mobile-card-row">
+                      <span className="mobile-card-label">Check Out</span>
+                      <span className="mobile-card-val">{formatTime(row.check_out)}</span>
+                    </div>
+                    <div className="mobile-card-row">
+                      <span className="mobile-card-label">Hours Worked</span>
+                      <span className="mobile-card-val"><strong>{hoursDisplay}</strong></span>
+                    </div>
+                  </div>
+                );
+              })}
+              {!filteredAttendance.length && (
+                <div style={{ textAlign: 'center', padding: 24, color: 'var(--slate-500)' }}>
+                  No attendance records found matching filters.
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -2407,29 +2766,74 @@ export default function App() {
               <div className="card-header">
                 <div>
                   <h3 className="card-title">Geofence Evidence Verification</h3>
-                  <p className="card-subtitle">Selfie camera photos and GPS distance audit trail</p>
+                  <p className="card-subtitle">Selfie camera photos and GPS distance audit trail for {filterMonth}</p>
                 </div>
 
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
                   {user.role !== 'EMPLOYEE' && (
                     <button
                       type="button"
-                      className="btn btn-outline-danger btn-sm"
-                      onClick={() => {
-                        setPurgeMonth(filterMonth || new Date().toISOString().slice(0, 7));
-                        setShowPurgeModal(true);
-                      }}
+                      className={`btn ${monthEndStatus.isAvailable ? 'btn-primary' : 'btn-secondary'} btn-sm`}
+                      onClick={() => handleExportAuditPackageAndPurge(filterMonth)}
+                      disabled={isPurgingEvidence || !monthEndStatus.isAvailable}
+                      title={!monthEndStatus.isAvailable ? monthEndStatus.reason : 'Export offline HTML audit report with embedded photos and auto-purge photos from database'}
                     >
-                      🗑️ Purge Month Evidence...
+                      {isPurgingEvidence ? (
+                        '⏳ Exporting & Auto-Purging...'
+                      ) : monthEndStatus.isAvailable ? (
+                        '📥 Export Audit Dossier & Auto-Purge'
+                      ) : (
+                        `🔒 Auto-Purge on Month End (${monthEndStatus.lastDayFormatted || 'Month End'})`
+                      )}
                     </button>
                   )}
                 </div>
               </div>
 
+              {/* Month-End Policy Alert Banner */}
+              {user.role !== 'EMPLOYEE' && (
+                <div
+                  className={`alert-banner ${monthEndStatus.isAvailable ? 'warning' : 'info'}`}
+                  style={{ margin: '0 20px 16px 20px' }}
+                >
+                  <div className="alert-banner-content">
+                    <span style={{ fontSize: 18 }}>{monthEndStatus.isAvailable ? '⚡' : '🛡️'}</span>
+                    <div>
+                      <strong>
+                        {monthEndStatus.isAvailable
+                          ? `Month-End Audit Window Open for ${filterMonth}`
+                          : `Month-End Auto-Purge Policy (${filterMonth})`}
+                      </strong>
+                      <div style={{ fontSize: 12, marginTop: 2, color: monthEndStatus.isAvailable ? 'inherit' : 'var(--slate-600)' }}>
+                        {monthEndStatus.isAvailable
+                          ? 'You can now export the complete Audit Dossier with all employee verification photos embedded. Database selfie photos will be automatically purged upon download to free storage.'
+                          : `Evidence photos are actively preserved during shift operations. On the final day of the month (${monthEndStatus.lastDayFormatted}), the "Export Audit Dossier & Auto-Purge" button will unlock to let you download the offline audit report and auto-clean the database.`}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Evidence Filter Bar */}
               <div className="filter-toolbar" style={{ margin: '0 20px 16px 20px' }}>
                 <div className="filter-row">
-                  <span className="filter-label">Status:</span>
+                  <span className="filter-label">Target Month:</span>
+                  <input
+                    type="month"
+                    value={filterMonth}
+                    onChange={(e) => {
+                      const m = e.target.value;
+                      setFilterMonth(m);
+                      if (m) {
+                        apiReq(`/attendance/evidence/?month=${m}${filterShop ? `&shop_id=${filterShop}` : ''}`)
+                          .then((ev) => setEvidenceList(ev))
+                          .catch(() => {});
+                      }
+                    }}
+                    style={{ padding: '6px 10px', fontSize: 13, fontWeight: 600 }}
+                  />
+
+                  <span className="filter-label" style={{ marginLeft: 8 }}>Status:</span>
                   <select
                     value={evidenceFilterStatus}
                     onChange={(e) => setEvidenceFilterStatus(e.target.value)}
@@ -2440,23 +2844,18 @@ export default function App() {
                     <option value="rejected">Rejected Only</option>
                   </select>
 
-                  <span className="filter-label" style={{ marginLeft: 8 }}>Filter Month:</span>
-                  <input
-                    type="month"
-                    value={filterMonth}
-                    onChange={(e) => {
-                      setFilterMonth(e.target.value);
-                      setFilterDateMode(e.target.value ? 'month' : 'all');
-                    }}
-                    style={{ padding: '6px 10px', fontSize: 13 }}
-                  />
-
                   {user.role !== 'EMPLOYEE' && (
                     <>
                       <span className="filter-label" style={{ marginLeft: 8 }}>Branch:</span>
                       <select
                         value={filterShop}
-                        onChange={(e) => setFilterShop(e.target.value)}
+                        onChange={(e) => {
+                          const sCode = e.target.value;
+                          setFilterShop(sCode);
+                          apiReq(`/attendance/evidence/?month=${filterMonth}${sCode ? `&shop_id=${sCode}` : ''}`)
+                            .then((ev) => setEvidenceList(ev))
+                            .catch(() => {});
+                        }}
                         style={{ padding: '6px 10px', fontSize: 13 }}
                       >
                         <option value="">All Branches</option>
@@ -2469,16 +2868,14 @@ export default function App() {
                     </>
                   )}
 
-                  {(filterMonth || filterShop || evidenceFilterStatus !== 'all') && (
+                  {(filterShop || evidenceFilterStatus !== 'all') && (
                     <button
                       type="button"
                       className="btn btn-secondary btn-sm"
                       style={{ marginLeft: 'auto' }}
                       onClick={() => {
-                        setFilterMonth('');
                         setFilterShop('');
                         setEvidenceFilterStatus('all');
-                        setFilterDateMode('all');
                       }}
                     >
                       ↺ Reset Filters
@@ -2490,8 +2887,22 @@ export default function App() {
               <div className="gallery-grid">
                 {filteredEvidence.map((ev) => (
                   <div key={ev.id} className="evidence-card">
-                    <div className="evidence-img-wrap" onClick={() => setZoomedImage(ev)}>
-                      <img src={ev.selfie} alt={`Selfie by ${ev.employee}`} />
+                    <div
+                      className="evidence-img-wrap"
+                      onClick={() => ev.selfie && setZoomedImage(ev)}
+                      style={{ cursor: ev.selfie ? 'pointer' : 'default' }}
+                    >
+                      {ev.selfie ? (
+                        <img src={ev.selfie} alt={`Selfie by ${ev.employee}`} />
+                      ) : (
+                        <div className="evidence-purged-box">
+                          <span style={{ fontSize: 28 }}>🛡️</span>
+                          <span className="evidence-purged-badge">Photo Purged</span>
+                          <span style={{ fontSize: 11, color: 'var(--slate-500)', marginTop: 4 }}>
+                            Preserved in Month-End Export
+                          </span>
+                        </div>
+                      )}
                       <span className={`evidence-tag badge ${ev.accepted ? 'badge-success' : 'badge-danger'}`}>
                         {ev.accepted ? '✓ Accepted' : '✕ Rejected'}
                       </span>
@@ -2513,10 +2924,10 @@ export default function App() {
                           Branch: <strong>{ev.shop}</strong>
                         </div>
                         <div>
-                          Distance from Branch: <strong>{ev.distance_m.toFixed(1)}m</strong>
+                          Distance from Branch: <strong>{Number(ev.distance_m).toFixed(1)}m</strong>
                         </div>
                         <div>
-                          GPS Accuracy: <strong>±{ev.accuracy_m.toFixed(1)}m</strong>
+                          GPS Accuracy: <strong>±{Number(ev.accuracy_m).toFixed(1)}m</strong>
                         </div>
                         {ev.reason && (
                           <div style={{ marginTop: 4, color: ev.accepted ? 'var(--primary-700)' : '#dc2626' }}>
@@ -3138,72 +3549,7 @@ export default function App() {
         </div>
       )}
 
-      {/* ================================================================== */}
-      {/* MODAL: PURGE EVIDENCE PHOTOS                                       */}
-      {/* ================================================================== */}
-      {showPurgeModal && (
-        <div className="modal-overlay">
-          <div className="modal-dialog" style={{ width: 480 }}>
-            <div className="modal-header">
-              <div>
-                <h3 style={{ fontSize: 18, fontWeight: 700, color: 'var(--danger-text)' }}>
-                  ⚠️ Purge Monthly Evidence
-                </h3>
-                <p className="card-subtitle">Free up database storage while preserving punch logs</p>
-              </div>
-              <button
-                type="button"
-                className="modal-close-btn"
-                onClick={() => setShowPurgeModal(false)}
-              >
-                ✕
-              </button>
-            </div>
 
-            <div style={{ marginTop: 14 }}>
-              <div style={{ background: '#fef2f2', padding: 14, borderRadius: 'var(--radius-sm)', border: '1px solid #fecaca', marginBottom: 16, fontSize: 13, color: '#991b1b' }}>
-                <strong>Important Notice:</strong>
-                <p style={{ marginTop: 4 }}>
-                  Ensure you have downloaded the <strong>Monthly Attendance CSV Report</strong> before purging. This action permanently deletes selfie camera evidence images for the selected month to save database storage.
-                </p>
-                <p style={{ marginTop: 6, fontWeight: 600 }}>
-                  ✓ Check-in/out timestamps, hours worked, GPS distances, and attendance history will remain 100% intact.
-                </p>
-              </div>
-
-              <div className="form-group">
-                <label>Target Month to Purge</label>
-                <input
-                  type="month"
-                  required
-                  value={purgeMonth}
-                  onChange={(e) => setPurgeMonth(e.target.value)}
-                  style={{ width: '100%' }}
-                />
-              </div>
-
-              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 20 }}>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => setShowPurgeModal(false)}
-                  disabled={isPurgingEvidence}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-danger"
-                  onClick={handlePurgeEvidence}
-                  disabled={isPurgingEvidence || !purgeMonth}
-                >
-                  {isPurgingEvidence ? 'Purging Photos...' : `Confirm Purge for ${purgeMonth}`}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ================================================================== */}
       {/* FLOATING TOAST NOTIFICATIONS                                       */}
