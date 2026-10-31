@@ -981,6 +981,10 @@ export default function App() {
               <strong>Secure Portal:</strong> Authorized personnel only. If you are logging in for the first time, you will be prompted to set up your security credentials.
             </p>
           </div>
+
+          <div className="login-footer">
+            © {new Date().getFullYear()} 1103techstudios. All rights reserved.
+          </div>
         </div>
 
         {/* Floating Toasts */}
@@ -1344,6 +1348,11 @@ export default function App() {
               {!isSidebarCollapsed && <span>Logout</span>}
             </button>
           </div>
+          {!isSidebarCollapsed && (
+            <div className="sidebar-copyright">
+              © {new Date().getFullYear()} 1103techstudios
+            </div>
+          )}
         </div>
       </aside>
 
@@ -1893,6 +1902,9 @@ export default function App() {
                 </div>
               </div>
 
+              <div className="table-mobile-hint">
+                <span>⇄ Swipe horizontally to view full table</span>
+              </div>
               <div className="table-responsive">
                 <table>
                   <thead>
@@ -2071,6 +2083,9 @@ export default function App() {
                 </div>
               </div>
 
+              <div className="table-mobile-hint">
+                <span>⇄ Swipe horizontally to view full table</span>
+              </div>
               <div className="table-responsive">
                 <table>
                   <thead>
@@ -2158,7 +2173,7 @@ export default function App() {
 
             {/* Filter Toolbar: Datewise, Daywise, Branchwise */}
             <div className="filter-toolbar">
-              <div className="filter-row">
+              <div className="filter-row filter-pills-row">
                 <span className="filter-label">Presets:</span>
                 <button
                   type="button"
@@ -2318,6 +2333,9 @@ export default function App() {
               </div>
             </div>
 
+            <div className="table-mobile-hint">
+              <span>⇄ Swipe horizontally to view full table</span>
+            </div>
             <div className="table-responsive">
               <table>
                 <thead>
@@ -2539,6 +2557,9 @@ export default function App() {
               </div>
             </div>
 
+            <div className="table-mobile-hint">
+              <span>⇄ Swipe horizontally to view full table</span>
+            </div>
             <div className="table-responsive">
               <table>
                 <thead>
@@ -2724,7 +2745,73 @@ export default function App() {
             </div>
           </div>
         )}
+
+        {/* Global Footer */}
+        <footer className="app-footer">
+          <div className="app-footer-content">
+            <span>PharmaTrack Geofence Attendance</span>
+            <span className="footer-dot">•</span>
+            <span>© {new Date().getFullYear()} 1103techstudios. All rights reserved.</span>
+          </div>
+        </footer>
         </main>
+
+        {/* Native Mobile Bottom Navigation Bar */}
+        <nav className="mobile-bottom-nav" aria-label="Mobile Navigation">
+          {tabs.slice(0, user.role === 'SUPER_ADMIN' ? 4 : 5).map((t) => {
+            const isActive = activeTab === t.id;
+            const shortLabel =
+              t.id === 'dashboard'
+                ? user.role === 'EMPLOYEE'
+                  ? 'Punch'
+                  : 'Home'
+                : t.id === 'shops'
+                ? user.role === 'SUPER_ADMIN'
+                  ? 'Shops'
+                  : 'Staff'
+                : t.id === 'my_attendance' || t.id === 'attendance'
+                ? 'Records'
+                : t.id === 'my_evidence' || t.id === 'evidence'
+                ? 'Photos'
+                : t.id === 'account'
+                ? 'Profile'
+                : t.label;
+
+            return (
+              <button
+                key={t.id}
+                type="button"
+                className={`mobile-bottom-nav-item ${isActive ? 'active' : ''}`}
+                onClick={() => {
+                  setActiveTab(t.id);
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                aria-selected={isActive}
+              >
+                <span className="mobile-bottom-nav-icon">{t.icon}</span>
+                <span className="mobile-bottom-nav-label">{shortLabel}</span>
+                {isActive && <span className="mobile-bottom-nav-dot" />}
+              </button>
+            );
+          })}
+          {user.role === 'SUPER_ADMIN' && (
+            <button
+              type="button"
+              className={`mobile-bottom-nav-item ${isMobileSidebarOpen || activeTab === 'auditlog' || activeTab === 'account' ? 'active' : ''}`}
+              onClick={() => setIsMobileSidebarOpen(true)}
+              aria-label="Open Full Navigation Menu"
+            >
+              <span className="mobile-bottom-nav-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="1.5" />
+                  <circle cx="19" cy="12" r="1.5" />
+                  <circle cx="5" cy="12" r="1.5" />
+                </svg>
+              </span>
+              <span className="mobile-bottom-nav-label">More</span>
+            </button>
+          )}
+        </nav>
       </div>
 
       {/* ================================================================== */}
@@ -2892,7 +2979,11 @@ export default function App() {
             {rosterLoading ? (
               <p>Loading roster...</p>
             ) : (
-              <div className="table-responsive">
+              <>
+                <div className="table-mobile-hint">
+                  <span>⇄ Swipe horizontally to view full table</span>
+                </div>
+                <div className="table-responsive">
                 <table>
                   <thead>
                     <tr>
@@ -2944,6 +3035,7 @@ export default function App() {
                   </tbody>
                 </table>
               </div>
+              </>
             )}
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
