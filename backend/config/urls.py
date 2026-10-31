@@ -1,7 +1,8 @@
 from django.contrib import admin
 from django.urls import path,include
 from django.http import JsonResponse
-from rest_framework_simplejwt.views import TokenObtainPairView,TokenRefreshView
+from accounts.views import CustomTokenObtainPairView
+from rest_framework_simplejwt.views import TokenRefreshView
 
 from django.db import connection
 from django.utils import timezone
@@ -38,7 +39,7 @@ urlpatterns=[
     path("db-check/", db_check),
     path("api/db-check/", db_check),
     path("admin/",admin.site.urls),
-    path("api/auth/token/",TokenObtainPairView.as_view()),
+    path("api/auth/token/",CustomTokenObtainPairView.as_view()),
     path("api/auth/token/refresh/",TokenRefreshView.as_view()),
     path("api/auth/",include("accounts.urls")),
     path("api/",include("shops.urls")),

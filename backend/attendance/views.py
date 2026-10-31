@@ -167,28 +167,59 @@ class Records(APIView):
         elif r.user.role != "SUPER_ADMIN":
             return Response([])
 
-        # Filter by shop_id or date if provided
+        # Filter by shop_id
         shop_id = r.query_params.get("shop_id")
         if shop_id:
             q = q.filter(shop_id=shop_id)
+
+        # Filter by exact date
         date = r.query_params.get("date")
         if date:
             q = q.filter(work_date=date)
 
-        records = q.order_by("-work_date", "-id")[:500]
-        return Response([
-            {
+        # Filter by date range (start_date to end_date)
+        start_date = r.query_params.get("start_date")
+        end_date = r.query_params.get("end_date")
+        if start_date:
+            q = q.filter(work_date__gte=start_date)
+        if end_date:
+            q = q.filter(work_date__lte=end_date)
+
+        # Filter by month (YYYY-MM)
+        month = r.query_params.get("month")
+        if month:
+            try:
+                yr, mo = month.split("-")
+                q = q.filter(work_date__year=int(yr), work_date__month=int(mo))
+            except ValueError:
+                pass
+
+        # Filter by day of week (1=Sunday, 2=Monday, ..., 7=Saturday)
+        day_of_week = r.query_params.get("day_of_week")
+        if day_of_week and day_of_week.isdigit():
+            q = q.filter(work_date__week_day=int(day_of_week))
+
+        records = q.order_by("-work_date", "-id")[:1000]
+        out = []
+        for a in records:
+            hours = None
+            if a.check_in and a.check_out:
+                diff_sec = (a.check_out - a.check_in).total_seconds()
+                hours = round(max(0.0, diff_sec / 3600), 2)
+
+            out.append({
                 "id": a.id,
                 "employee": a.employee.code,
                 "employee_name": a.employee.user.first_name or a.employee.code,
                 "shop": a.shop.name,
                 "shop_code": a.shop.code,
                 "date": a.work_date.isoformat(),
+                "day_of_week": a.work_date.strftime("%A"),
                 "check_in": a.check_in.isoformat() if a.check_in else None,
                 "check_out": a.check_out.isoformat() if a.check_out else None,
-            }
-            for a in records
-        ])
+                "hours_worked": hours,
+            })
+        return Response(out)
 
 class Evidence(APIView):
     permission_classes = [IsAuthenticated]
@@ -202,17 +233,39 @@ class Evidence(APIView):
         elif r.user.role != "SUPER_ADMIN":
             return Response([])
 
-        # Filter by shop_id or accepted status if provided
+        # Filter by shop_id
         shop_id = r.query_params.get("shop_id")
         if shop_id:
             q = q.filter(shop_id=shop_id)
+
+        # Filter by status
         status_param = r.query_params.get("status")
         if status_param == "accepted":
             q = q.filter(accepted=True)
         elif status_param == "rejected":
             q = q.filter(accepted=False)
 
-        events = q.order_by("-created_at")[:300]
+        # Datewise filters
+        date = r.query_params.get("date")
+        if date:
+            q = q.filter(created_at__date=date)
+        start_date = r.query_params.get("start_date")
+        end_date = r.query_params.get("end_date")
+        if start_date:
+            q = q.filter(created_at__date__gte=start_date)
+        if end_date:
+            q = q.filter(created_at__date__lte=end_date)
+
+        # Month filter
+        month = r.query_params.get("month")
+        if month:
+            try:
+                yr, mo = month.split("-")
+                q = q.filter(created_at__year=int(yr), created_at__month=int(mo))
+            except ValueError:
+                pass
+
+        events = q.order_by("-created_at")[:500]
         return Response([
             {
                 "id": x.id,
@@ -232,3 +285,53 @@ class Evidence(APIView):
             }
             for x in events
         ])
+
+class EvidencePurge(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, r):
+        if r.user.role not in ("SUPER_ADMIN", "MANAGER"):
+            return Response({"detail": "Only Super Admins and Managers can purge evidence."}, status=403)
+
+        q = Event.objects.all()
+        if r.user.role == "MANAGER":
+            q = q.filter(shop__manager_links__manager=r.user)
+
+        shop_id = r.data.get("shop_id")
+        if shop_id:
+            q = q.filter(shop_id=shop_id)
+
+        month = r.data.get("month") # format 'YYYY-MM'
+        start_date = r.data.get("start_date")
+        end_date = r.data.get("end_date")
+
+        if month:
+            try:
+                yr, mo = month.split("-")
+                q = q.filter(created_at__year=int(yr), created_at__month=int(mo))
+            except ValueError:
+                return Response({"detail": "Invalid month format. Expected YYYY-MM."}, status=400)
+        elif start_date and end_date:
+            q = q.filter(created_at__date__gte=start_date, created_at__date__lte=end_date)
+        elif start_date:
+            q = q.filter(created_at__date=start_date)
+        else:
+            return Response({"detail": "Please specify a month (YYYY-MM) or date range to purge."}, status=400)
+
+        count = q.count()
+        if count == 0:
+            return Response({"detail": "No evidence records found for the specified period.", "purged_count": 0})
+
+        period_desc = month if month else f"{start_date} to {end_date}"
+        with transaction.atomic():
+            q.delete()
+            AuditLog.log_event(
+                user=r.user,
+                action="EVIDENCE_PURGED",
+                details=f"Purged {count} evidence records for period: {period_desc}"
+            )
+
+        return Response({
+            "detail": f"Successfully purged {count} evidence photo records for {period_desc}. Attendance check-in/out records remain preserved.",
+            "purged_count": count
+        })

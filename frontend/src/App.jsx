@@ -386,10 +386,23 @@ export default function App() {
   // Modal Preview Image
   const [zoomedImage, setZoomedImage] = useState(null);
 
-  // Filters
+  // Advanced Filters & Reports
   const [filterShop, setFilterShop] = useState('');
+  const [filterDateMode, setFilterDateMode] = useState('all'); // 'all', 'single', 'range', 'month'
   const [filterDate, setFilterDate] = useState('');
+  const [filterStartDate, setFilterStartDate] = useState('');
+  const [filterEndDate, setFilterEndDate] = useState('');
+  const [filterMonth, setFilterMonth] = useState('');
+  const [filterDayOfWeek, setFilterDayOfWeek] = useState('');
   const [evidenceFilterStatus, setEvidenceFilterStatus] = useState('all');
+
+  // Modals: Manager Password Reset & Evidence Purge
+  const [resetManagerModal, setResetManagerModal] = useState(null);
+  const [resetManagerPass, setResetManagerPass] = useState('');
+  const [isResettingPass, setIsResettingPass] = useState(false);
+  const [showPurgeModal, setShowPurgeModal] = useState(false);
+  const [purgeMonth, setPurgeMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [isPurgingEvidence, setIsPurgingEvidence] = useState(false);
 
   // Toasts
   const [toasts, setToasts] = useState([]);
@@ -762,26 +775,161 @@ export default function App() {
     }
   }
 
-  // CSV Export for Attendance Records
+  // Delete Employee (Manager or Super Admin)
+  async function handleDeleteEmployee(shopId, emp) {
+    const confirmMsg = `Are you sure you want to delete staff "${emp.full_name || emp.code}" (${emp.code})?\n\nThis will remove their profile and login access. This action cannot be undone.`;
+    if (!window.confirm(confirmMsg)) return;
+
+    try {
+      await apiReq(`/shops/${shopId}/employees/${emp.id}/`, { method: 'DELETE' });
+      addToast(`Employee ${emp.code} deleted successfully.`, 'success');
+      // Refresh roster modal
+      const emps = await apiReq(`/shops/${shopId}/employees/`);
+      setShopEmployeesRoster((prev) => ({ ...prev, employees: emps }));
+      await loadAllData(user);
+    } catch (err) {
+      addToast(err.message, 'error');
+    }
+  }
+
+  // Super Admin: Reset Manager Password
+  async function handleResetManagerPassword(e) {
+    e.preventDefault();
+    if (!resetManagerModal) return;
+    if (resetManagerPass.length < 8) {
+      addToast('Password must be at least 8 characters long.', 'warning');
+      return;
+    }
+    setIsResettingPass(true);
+    try {
+      const res = await apiReq(`/managers/${resetManagerModal.id}/`, {
+        method: 'PATCH',
+        body: JSON.stringify({ password: resetManagerPass }),
+      });
+      addToast(res.detail, 'success');
+      setResetManagerModal(null);
+      setResetManagerPass('');
+      await loadAllData(user);
+    } catch (err) {
+      addToast(err.message, 'error');
+    } finally {
+      setIsResettingPass(false);
+    }
+  }
+
+  // Super Admin: Delete Manager
+  async function handleDeleteManager(m) {
+    const confirmMsg = `Are you sure you want to delete manager "${m.username}"?\n\nThey will lose access to all managed pharmacy branches.`;
+    if (!window.confirm(confirmMsg)) return;
+
+    try {
+      const res = await apiReq(`/managers/${m.id}/`, { method: 'DELETE' });
+      addToast(res.detail, 'success');
+      await loadAllData(user);
+    } catch (err) {
+      addToast(err.message, 'error');
+    }
+  }
+
+  // Manager or Super Admin: Purge Evidence Photos
+  async function handlePurgeEvidence() {
+    if (!purgeMonth) {
+      addToast('Please select a valid month to purge.', 'warning');
+      return;
+    }
+
+    const confirmMsg = `⚠️ CAUTION: Purge Evidence Photos for ${purgeMonth}?\n\nThis will permanently delete the heavy selfie photos for this month to save storage space.\n\nAll numerical attendance hours, check-in/out times, and dates remain 100% preserved.`;
+    if (!window.confirm(confirmMsg)) return;
+
+    setIsPurgingEvidence(true);
+    try {
+      const res = await apiReq('/attendance/evidence/purge/', {
+        method: 'POST',
+        body: JSON.stringify({ month: purgeMonth, ...(filterShop ? { shop_id: filterShop } : {}) }),
+      });
+      addToast(res.detail, 'success');
+      setShowPurgeModal(false);
+      await loadAllData(user);
+    } catch (err) {
+      addToast(err.message, 'error');
+    } finally {
+      setIsPurgingEvidence(false);
+    }
+  }
+
+  // Quick Preset Handlers for Filters
+  function setPresetDateFilter(preset) {
+    const now = new Date();
+    if (preset === 'today') {
+      const todayStr = now.toISOString().slice(0, 10);
+      setFilterDateMode('single');
+      setFilterDate(todayStr);
+    } else if (preset === 'yesterday') {
+      const y = new Date(now);
+      y.setDate(y.getDate() - 1);
+      setFilterDateMode('single');
+      setFilterDate(y.toISOString().slice(0, 10));
+    } else if (preset === 'this_month') {
+      const mStr = now.toISOString().slice(0, 7);
+      setFilterDateMode('month');
+      setFilterMonth(mStr);
+    } else if (preset === 'all') {
+      setFilterDateMode('all');
+      setFilterDate('');
+      setFilterStartDate('');
+      setFilterEndDate('');
+      setFilterMonth('');
+      setFilterDayOfWeek('');
+    }
+  }
+
+  // CSV Export for Attendance Records (with full daywise and monthly details)
   function exportAttendanceCSV() {
-    if (!attendanceRows.length) return;
-    const headers = ['ID', 'Employee Code', 'Shop', 'Work Date', 'Check In', 'Check Out'];
-    const rows = attendanceRows.map((r) => [
-      r.id,
-      r.employee,
-      r.shop,
-      r.date,
-      r.check_in ? new Date(r.check_in).toLocaleString() : 'N/A',
-      r.check_out ? new Date(r.check_out).toLocaleString() : 'N/A',
-    ]);
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers, ...rows].map((e) => e.join(',')).join('\n');
+    const listToExport = filteredAttendance.length ? filteredAttendance : attendanceRows;
+    if (!listToExport.length) {
+      addToast('No attendance records available to export.', 'info');
+      return;
+    }
+    const headers = [
+      'Record ID',
+      'Staff ID',
+      'Staff Name',
+      'Branch',
+      'Branch Code',
+      'Work Date',
+      'Day of Week',
+      'Check In Time',
+      'Check Out Time',
+      'Hours Worked',
+      'Shift Status',
+    ];
+    const rows = listToExport.map((r) => {
+      const dayName = new Date(r.date).toLocaleDateString('en-US', { weekday: 'long' });
+      const status = r.check_out ? 'Completed' : r.check_in ? 'Active Shift' : 'Pending';
+      return [
+        `"${r.id}"`,
+        `"${r.employee}"`,
+        `"${(r.employee_name || r.employee).replace(/"/g, '""')}"`,
+        `"${(r.shop || '').replace(/"/g, '""')}"`,
+        `"${r.shop_code || ''}"`,
+        `"${r.date}"`,
+        `"${r.day_of_week || dayName}"`,
+        `"${r.check_in ? new Date(r.check_in).toLocaleTimeString() : 'N/A'}"`,
+        `"${r.check_out ? new Date(r.check_out).toLocaleTimeString() : 'N/A'}"`,
+        `"${r.hours_worked !== undefined && r.hours_worked !== null ? r.hours_worked + ' hrs' : 'N/A'}"`,
+        `"${status}"`,
+      ];
+    });
+    const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `pharmacy_attendance_${new Date().toISOString().slice(0, 10)}.csv`);
+    const dateLabel = filterDateMode === 'month' && filterMonth ? filterMonth : (filterDate || new Date().toISOString().slice(0, 10));
+    link.setAttribute('download', `pharmacy_attendance_report_${dateLabel}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    addToast('Monthly attendance report exported successfully!', 'success');
   }
 
   // --------------------------------------------------------------------------
@@ -803,11 +951,11 @@ export default function App() {
 
           <form onSubmit={handleLogin} className="form-grid">
             <div className="form-group">
-              <label>Username or Employee ID</label>
+              <label>Username or Staff ID</label>
               <input
                 type="text"
                 required
-                placeholder="e.g. faiyas or S1001"
+                placeholder="Enter username or Staff ID"
                 value={usernameInput}
                 onChange={(e) => setUsernameInput(e.target.value)}
               />
@@ -830,7 +978,7 @@ export default function App() {
 
           <div style={{ marginTop: 24, padding: 14, background: 'var(--slate-50)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--slate-200)' }}>
             <p style={{ fontSize: 12, color: 'var(--slate-600)' }}>
-              <strong>Notice:</strong> Employees use their assigned ID (e.g. <code>S1001</code>) and temporary PIN <code>1234</code>. Mandatory password update applies on initial access.
+              <strong>Secure Portal:</strong> Authorized personnel only. If you are logging in for the first time, you will be prompted to set up your security credentials.
             </p>
           </div>
         </div>
@@ -1027,16 +1175,51 @@ export default function App() {
     });
   }
 
-  // Filtered lists
+  // Filtered lists (Datewise, Daywise, Branchwise)
   const filteredAttendance = attendanceRows.filter((row) => {
     if (filterShop && row.shop_code !== filterShop && row.shop !== filterShop) return false;
-    if (filterDate && row.date !== filterDate) return false;
+
+    // Day of the week filter (Monday, Tuesday, etc.)
+    if (filterDayOfWeek) {
+      const d = new Date(row.date);
+      const dayName = d.toLocaleDateString('en-US', { weekday: 'long' });
+      if (dayName !== filterDayOfWeek) return false;
+    }
+
+    // Date filters (single, range, month)
+    if (filterDateMode === 'single' && filterDate) {
+      if (row.date !== filterDate) return false;
+    } else if (filterDateMode === 'range') {
+      if (filterStartDate && row.date < filterStartDate) return false;
+      if (filterEndDate && row.date > filterEndDate) return false;
+    } else if (filterDateMode === 'month' && filterMonth) {
+      if (!row.date.startsWith(filterMonth)) return false;
+    }
+
     return true;
   });
 
   const filteredEvidence = evidenceList.filter((ev) => {
+    if (filterShop && ev.shop_code !== filterShop && ev.shop !== filterShop) return false;
     if (evidenceFilterStatus === 'accepted' && !ev.accepted) return false;
     if (evidenceFilterStatus === 'rejected' && ev.accepted) return false;
+
+    const evDate = (ev.time || '').slice(0, 10);
+    if (filterDayOfWeek && evDate) {
+      const d = new Date(evDate);
+      const dayName = d.toLocaleDateString('en-US', { weekday: 'long' });
+      if (dayName !== filterDayOfWeek) return false;
+    }
+
+    if (filterDateMode === 'single' && filterDate) {
+      if (evDate !== filterDate) return false;
+    } else if (filterDateMode === 'range') {
+      if (filterStartDate && evDate < filterStartDate) return false;
+      if (filterEndDate && evDate > filterEndDate) return false;
+    } else if (filterDateMode === 'month' && filterMonth) {
+      if (!evDate.startsWith(filterMonth)) return false;
+    }
+
     return true;
   });
 
@@ -1895,6 +2078,7 @@ export default function App() {
                       <th>Manager</th>
                       <th>Registered Date</th>
                       <th>Managed Branches</th>
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1915,11 +2099,32 @@ export default function App() {
                             <span style={{ fontSize: 12, color: 'var(--slate-400)' }}>No branches assigned</span>
                           )}
                         </td>
+                        <td>
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => {
+                                setResetManagerModal(m);
+                                setResetManagerPass('');
+                              }}
+                            >
+                              🔑 Reset Password
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-outline-danger btn-sm"
+                              onClick={() => handleDeleteManager(m)}
+                            >
+                              🗑️ Delete
+                            </button>
+                          </div>
+                        </td>
                       </tr>
                     ))}
                     {!managers.length && (
                       <tr>
-                        <td colSpan="3" style={{ textAlign: 'center', padding: 24, color: 'var(--slate-500)' }}>
+                        <td colSpan="4" style={{ textAlign: 'center', padding: 24, color: 'var(--slate-500)' }}>
                           No managers registered yet.
                         </td>
                       </tr>
@@ -1941,23 +2146,175 @@ export default function App() {
                 <h3 className="card-title">
                   {user.role === 'EMPLOYEE' ? 'My Attendance History' : 'Attendance Punch Records'}
                 </h3>
-                <p className="card-subtitle">Verified check-in and check-out logs</p>
+                <p className="card-subtitle">Verified check-in, check-out logs and shift duration</p>
               </div>
 
-              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                {user.role !== 'EMPLOYEE' && (
-                  <>
+              {user.role !== 'EMPLOYEE' && (
+                <button type="button" className="btn btn-primary btn-sm" onClick={exportAttendanceCSV}>
+                  📥 Export Monthly Report (CSV)
+                </button>
+              )}
+            </div>
+
+            {/* Filter Toolbar: Datewise, Daywise, Branchwise */}
+            <div className="filter-toolbar">
+              <div className="filter-row">
+                <span className="filter-label">Presets:</span>
+                <button
+                  type="button"
+                  className={`btn-pill ${filterDateMode === 'all' && !filterDayOfWeek ? 'active' : ''}`}
+                  onClick={() => setPresetDateFilter('all')}
+                >
+                  All Records
+                </button>
+                <button
+                  type="button"
+                  className={`btn-pill ${filterDateMode === 'single' && filterDate === new Date().toISOString().slice(0, 10) ? 'active' : ''}`}
+                  onClick={() => setPresetDateFilter('today')}
+                >
+                  Today
+                </button>
+                <button
+                  type="button"
+                  className={`btn-pill ${filterDateMode === 'single' && filterDate && filterDate !== new Date().toISOString().slice(0, 10) ? 'active' : ''}`}
+                  onClick={() => setPresetDateFilter('yesterday')}
+                >
+                  Yesterday
+                </button>
+                <button
+                  type="button"
+                  className={`btn-pill ${filterDateMode === 'month' ? 'active' : ''}`}
+                  onClick={() => setPresetDateFilter('this_month')}
+                >
+                  This Month
+                </button>
+              </div>
+
+              <div className="filter-row">
+                {/* Date Filter Mode */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span className="filter-label">Filter Mode:</span>
+                  <select
+                    value={filterDateMode}
+                    onChange={(e) => setFilterDateMode(e.target.value)}
+                    style={{ padding: '6px 10px', fontSize: 13 }}
+                  >
+                    <option value="all">All Dates</option>
+                    <option value="single">Single Date</option>
+                    <option value="range">Date Range</option>
+                    <option value="month">By Month</option>
+                  </select>
+                </div>
+
+                {/* Single Date */}
+                {filterDateMode === 'single' && (
+                  <input
+                    type="date"
+                    value={filterDate}
+                    onChange={(e) => setFilterDate(e.target.value)}
+                    style={{ padding: '6px 10px', fontSize: 13 }}
+                  />
+                )}
+
+                {/* Date Range */}
+                {filterDateMode === 'range' && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <input
                       type="date"
-                      value={filterDate}
-                      onChange={(e) => setFilterDate(e.target.value)}
-                      style={{ width: 160 }}
+                      value={filterStartDate}
+                      onChange={(e) => setFilterStartDate(e.target.value)}
+                      style={{ padding: '6px 10px', fontSize: 13 }}
+                      title="From Date"
                     />
-                    <button type="button" className="btn btn-secondary btn-sm" onClick={exportAttendanceCSV}>
-                      📥 Export CSV
-                    </button>
-                  </>
+                    <span style={{ fontSize: 12, color: 'var(--slate-400)' }}>to</span>
+                    <input
+                      type="date"
+                      value={filterEndDate}
+                      onChange={(e) => setFilterEndDate(e.target.value)}
+                      style={{ padding: '6px 10px', fontSize: 13 }}
+                      title="To Date"
+                    />
+                  </div>
                 )}
+
+                {/* Month Selector */}
+                {filterDateMode === 'month' && (
+                  <input
+                    type="month"
+                    value={filterMonth}
+                    onChange={(e) => setFilterMonth(e.target.value)}
+                    style={{ padding: '6px 10px', fontSize: 13 }}
+                  />
+                )}
+
+                {/* Day of Week Selector */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span className="filter-label">Day:</span>
+                  <select
+                    value={filterDayOfWeek}
+                    onChange={(e) => setFilterDayOfWeek(e.target.value)}
+                    style={{ padding: '6px 10px', fontSize: 13 }}
+                  >
+                    <option value="">All Days</option>
+                    <option value="Monday">Monday</option>
+                    <option value="Tuesday">Tuesday</option>
+                    <option value="Wednesday">Wednesday</option>
+                    <option value="Thursday">Thursday</option>
+                    <option value="Friday">Friday</option>
+                    <option value="Saturday">Saturday</option>
+                    <option value="Sunday">Sunday</option>
+                  </select>
+                </div>
+
+                {/* Branch Filter */}
+                {user.role !== 'EMPLOYEE' && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span className="filter-label">Branch:</span>
+                    <select
+                      value={filterShop}
+                      onChange={(e) => setFilterShop(e.target.value)}
+                      style={{ padding: '6px 10px', fontSize: 13 }}
+                    >
+                      <option value="">All Branches</option>
+                      {shops.map((s) => (
+                        <option key={s.id} value={s.code}>
+                          {s.code} - {s.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {(filterDateMode !== 'all' || filterDayOfWeek || filterShop) && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    style={{ marginLeft: 'auto' }}
+                    onClick={() => setPresetDateFilter('all')}
+                  >
+                    ↺ Reset
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Summary Statistics Strip */}
+            <div className="summary-strip">
+              <div className="summary-item">
+                <span>Total Punches:</span>
+                <strong>{filteredAttendance.length}</strong>
+              </div>
+              <div className="summary-item">
+                <span>Completed Shifts:</span>
+                <strong style={{ color: 'var(--primary-700)' }}>
+                  {filteredAttendance.filter((r) => r.check_out).length}
+                </strong>
+              </div>
+              <div className="summary-item">
+                <span>Active Shifts:</span>
+                <strong style={{ color: 'var(--accent-blue)' }}>
+                  {filteredAttendance.filter((r) => r.check_in && !r.check_out).length}
+                </strong>
               </div>
             </div>
 
@@ -1965,45 +2322,61 @@ export default function App() {
               <table>
                 <thead>
                   <tr>
-                    <th>Employee Code</th>
+                    <th>Staff</th>
                     <th>Branch</th>
                     <th>Work Date</th>
+                    <th>Day</th>
                     <th>Check In</th>
                     <th>Check Out</th>
+                    <th>Hours Worked</th>
                     <th>Shift Status</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredAttendance.map((row) => (
-                    <tr key={row.id}>
-                      <td>
-                        <strong>{row.employee_name || row.employee}</strong>
-                        {row.employee_name && row.employee_name !== row.employee && (
-                          <div style={{ fontSize: 11, color: 'var(--slate-500)', fontFamily: 'var(--font-mono)' }}>
-                            ID: {row.employee}
-                          </div>
-                        )}
-                      </td>
-                      <td>
-                        {row.shop} <span style={{ fontSize: 11, color: 'var(--slate-400)' }}>({row.shop_code})</span>
-                      </td>
-                      <td>{formatDate(row.date)}</td>
-                      <td>{formatTime(row.check_in)}</td>
-                      <td>{formatTime(row.check_out)}</td>
-                      <td>
-                        {row.check_out ? (
-                          <span className="badge badge-success">Completed</span>
-                        ) : row.check_in ? (
-                          <span className="badge badge-primary">Active Shift</span>
-                        ) : (
-                          <span className="badge badge-neutral">—</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
+                  {filteredAttendance.map((row) => {
+                    const dayName = new Date(row.date).toLocaleDateString('en-US', { weekday: 'short' });
+                    let hoursDisplay = '—';
+                    if (row.check_in && row.check_out) {
+                      const diffSec = (new Date(row.check_out) - new Date(row.check_in)) / 1000;
+                      hoursDisplay = `${(Math.max(0, diffSec) / 3600).toFixed(1)} hrs`;
+                    }
+                    return (
+                      <tr key={row.id}>
+                        <td>
+                          <strong>{row.employee_name || row.employee}</strong>
+                          {row.employee_name && row.employee_name !== row.employee && (
+                            <div style={{ fontSize: 11, color: 'var(--slate-500)', fontFamily: 'var(--font-mono)' }}>
+                              ID: {row.employee}
+                            </div>
+                          )}
+                        </td>
+                        <td>
+                          {row.shop} <span style={{ fontSize: 11, color: 'var(--slate-400)' }}>({row.shop_code})</span>
+                        </td>
+                        <td>{formatDate(row.date)}</td>
+                        <td>
+                          <span className="badge badge-neutral">{dayName}</span>
+                        </td>
+                        <td>{formatTime(row.check_in)}</td>
+                        <td>{formatTime(row.check_out)}</td>
+                        <td>
+                          <strong>{hoursDisplay}</strong>
+                        </td>
+                        <td>
+                          {row.check_out ? (
+                            <span className="badge badge-success">Completed</span>
+                          ) : row.check_in ? (
+                            <span className="badge badge-primary">Active Shift</span>
+                          ) : (
+                            <span className="badge badge-neutral">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                   {!filteredAttendance.length && (
                     <tr>
-                      <td colSpan="6" style={{ textAlign: 'center', padding: 24, color: 'var(--slate-500)' }}>
+                      <td colSpan="8" style={{ textAlign: 'center', padding: 24, color: 'var(--slate-500)' }}>
                         No attendance records found matching filters.
                       </td>
                     </tr>
@@ -2026,16 +2399,80 @@ export default function App() {
                   <p className="card-subtitle">Selfie camera photos and GPS distance audit trail</p>
                 </div>
 
-                <div style={{ display: 'flex', gap: 10 }}>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                  {user.role !== 'EMPLOYEE' && (
+                    <button
+                      type="button"
+                      className="btn btn-outline-danger btn-sm"
+                      onClick={() => {
+                        setPurgeMonth(filterMonth || new Date().toISOString().slice(0, 7));
+                        setShowPurgeModal(true);
+                      }}
+                    >
+                      🗑️ Purge Month Evidence...
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Evidence Filter Bar */}
+              <div className="filter-toolbar" style={{ margin: '0 20px 16px 20px' }}>
+                <div className="filter-row">
+                  <span className="filter-label">Status:</span>
                   <select
                     value={evidenceFilterStatus}
                     onChange={(e) => setEvidenceFilterStatus(e.target.value)}
-                    style={{ width: 160 }}
+                    style={{ padding: '6px 10px', fontSize: 13 }}
                   >
                     <option value="all">All Evidence</option>
                     <option value="accepted">Accepted Only</option>
                     <option value="rejected">Rejected Only</option>
                   </select>
+
+                  <span className="filter-label" style={{ marginLeft: 8 }}>Filter Month:</span>
+                  <input
+                    type="month"
+                    value={filterMonth}
+                    onChange={(e) => {
+                      setFilterMonth(e.target.value);
+                      setFilterDateMode(e.target.value ? 'month' : 'all');
+                    }}
+                    style={{ padding: '6px 10px', fontSize: 13 }}
+                  />
+
+                  {user.role !== 'EMPLOYEE' && (
+                    <>
+                      <span className="filter-label" style={{ marginLeft: 8 }}>Branch:</span>
+                      <select
+                        value={filterShop}
+                        onChange={(e) => setFilterShop(e.target.value)}
+                        style={{ padding: '6px 10px', fontSize: 13 }}
+                      >
+                        <option value="">All Branches</option>
+                        {shops.map((s) => (
+                          <option key={s.id} value={s.code}>
+                            {s.code} - {s.name}
+                          </option>
+                        ))}
+                      </select>
+                    </>
+                  )}
+
+                  {(filterMonth || filterShop || evidenceFilterStatus !== 'all') && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      style={{ marginLeft: 'auto' }}
+                      onClick={() => {
+                        setFilterMonth('');
+                        setFilterShop('');
+                        setEvidenceFilterStatus('all');
+                        setFilterDateMode('all');
+                      }}
+                    >
+                      ↺ Reset Filters
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -2194,8 +2631,8 @@ export default function App() {
                     <span>🔑</span>
                     <div>
                       {user.role === 'EMPLOYEE'
-                        ? 'Initial setup required: enter your personal details and change the temporary PIN (1234) to activate your account.'
-                        : 'Your account is using a temporary password. Please set a new password (8+ characters).'}
+                        ? 'Initial setup required: please enter your personal details and set a secure personal password to activate your account.'
+                        : 'Your account is using a temporary password. Please set a new secure password (8+ characters).'}
                     </div>
                   </div>
                 </div>
@@ -2210,7 +2647,7 @@ export default function App() {
                       <input
                         type="text"
                         required
-                        placeholder="e.g. Rahul Sharma"
+                        placeholder="Enter your full legal name"
                         value={empFullName}
                         onChange={(e) => setEmpFullName(e.target.value)}
                       />
@@ -2222,7 +2659,7 @@ export default function App() {
                         <input
                           type="email"
                           required
-                          placeholder="e.g. rahul@example.com"
+                          placeholder="Enter your email address"
                           value={empEmail}
                           onChange={(e) => setEmpEmail(e.target.value)}
                         />
@@ -2243,10 +2680,10 @@ export default function App() {
                 )}
 
                 <div className="form-group">
-                  <label>Current Password {user.must_change_password && user.role === 'EMPLOYEE' && '(Default PIN: 1234)'} *</label>
+                  <label>Current Password *</label>
                   <PasswordInput
                     required
-                    placeholder={user.must_change_password && user.role === 'EMPLOYEE' ? 'Enter temporary PIN 1234' : 'Enter existing password'}
+                    placeholder="Enter current password"
                     value={oldPassword}
                     onChange={(e) => setOldPassword(e.target.value)}
                   />
@@ -2464,6 +2901,7 @@ export default function App() {
                       <th>Email</th>
                       <th>Date of Birth</th>
                       <th>Account Status</th>
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2484,11 +2922,21 @@ export default function App() {
                             <span className="badge badge-success">✓ Profile Activated</span>
                           )}
                         </td>
+                        <td>
+                          <button
+                            type="button"
+                            className="btn btn-outline-danger btn-sm"
+                            style={{ padding: '4px 8px', fontSize: 11 }}
+                            onClick={() => handleDeleteEmployee(shopEmployeesRoster.shop.id, emp)}
+                          >
+                            🗑️ Delete
+                          </button>
+                        </td>
                       </tr>
                     ))}
                     {!shopEmployeesRoster.employees.length && (
                       <tr>
-                        <td colSpan="5" style={{ textAlign: 'center', padding: 20, color: 'var(--slate-500)' }}>
+                        <td colSpan="6" style={{ textAlign: 'center', padding: 20, color: 'var(--slate-500)' }}>
                           No employees registered under this branch yet.
                         </td>
                       </tr>
@@ -2545,6 +2993,127 @@ export default function App() {
                 <span className={`badge ${zoomedImage.accepted ? 'badge-success' : 'badge-danger'}`}>
                   {zoomedImage.accepted ? 'Verified within geofence' : `Rejected: ${zoomedImage.reason}`}
                 </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ================================================================== */}
+      {/* MODAL: RESET MANAGER PASSWORD                                      */}
+      {/* ================================================================== */}
+      {resetManagerModal && (
+        <div className="modal-overlay">
+          <div className="modal-dialog" style={{ width: 440 }}>
+            <div className="modal-header">
+              <div>
+                <h3 style={{ fontSize: 18, fontWeight: 700 }}>Reset Manager Password</h3>
+                <span className="badge badge-primary">{resetManagerModal.username}</span>
+              </div>
+              <button
+                type="button"
+                className="modal-close-btn"
+                onClick={() => setResetManagerModal(null)}
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleResetManagerPassword} className="form-grid" style={{ marginTop: 16 }}>
+              <div className="form-group">
+                <label>New Password for {resetManagerModal.username} *</label>
+                <PasswordInput
+                  required
+                  minLength={8}
+                  placeholder="Minimum 8 characters"
+                  value={resetManagerPass}
+                  onChange={(e) => setResetManagerPass(e.target.value)}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setResetManagerModal(null)}
+                  disabled={isResettingPass}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={isResettingPass || resetManagerPass.length < 8}
+                >
+                  {isResettingPass ? 'Updating...' : 'Save New Password'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ================================================================== */}
+      {/* MODAL: PURGE EVIDENCE PHOTOS                                       */}
+      {/* ================================================================== */}
+      {showPurgeModal && (
+        <div className="modal-overlay">
+          <div className="modal-dialog" style={{ width: 480 }}>
+            <div className="modal-header">
+              <div>
+                <h3 style={{ fontSize: 18, fontWeight: 700, color: 'var(--danger-text)' }}>
+                  ⚠️ Purge Monthly Evidence
+                </h3>
+                <p className="card-subtitle">Free up database storage while preserving punch logs</p>
+              </div>
+              <button
+                type="button"
+                className="modal-close-btn"
+                onClick={() => setShowPurgeModal(false)}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ marginTop: 14 }}>
+              <div style={{ background: '#fef2f2', padding: 14, borderRadius: 'var(--radius-sm)', border: '1px solid #fecaca', marginBottom: 16, fontSize: 13, color: '#991b1b' }}>
+                <strong>Important Notice:</strong>
+                <p style={{ marginTop: 4 }}>
+                  Ensure you have downloaded the <strong>Monthly Attendance CSV Report</strong> before purging. This action permanently deletes selfie camera evidence images for the selected month to save database storage.
+                </p>
+                <p style={{ marginTop: 6, fontWeight: 600 }}>
+                  ✓ Check-in/out timestamps, hours worked, GPS distances, and attendance history will remain 100% intact.
+                </p>
+              </div>
+
+              <div className="form-group">
+                <label>Target Month to Purge</label>
+                <input
+                  type="month"
+                  required
+                  value={purgeMonth}
+                  onChange={(e) => setPurgeMonth(e.target.value)}
+                  style={{ width: '100%' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 20 }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowPurgeModal(false)}
+                  disabled={isPurgingEvidence}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  onClick={handlePurgeEvidence}
+                  disabled={isPurgingEvidence || !purgeMonth}
+                >
+                  {isPurgingEvidence ? 'Purging Photos...' : `Confirm Purge for ${purgeMonth}`}
+                </button>
               </div>
             </div>
           </div>

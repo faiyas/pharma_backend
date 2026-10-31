@@ -1662,3 +1662,109 @@ tbody tr:hover {
     grid-template-columns: 1fr;
   }
 }
+
+/* ========================================================================== */
+/* ADVANCED FILTERS, DATE/DAY PICKERS & ACTION BUTTONS                        */
+/* ========================================================================== */
+.btn-danger {
+  background: #ef4444;
+  color: #fff;
+  border: 1px solid #dc2626;
+}
+
+.btn-danger:hover {
+  background: #dc2626;
+  color: #fff;
+}
+
+.btn-danger:active {
+  background: #b91c1c;
+}
+
+.btn-outline-danger {
+  background: transparent;
+  color: #ef4444;
+  border: 1px solid #fca5a5;
+}
+
+.btn-outline-danger:hover {
+  background: #fef2f2;
+  color: #b91c1c;
+  border-color: #ef4444;
+}
+
+.filter-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--slate-50);
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--slate-200);
+  margin-bottom: 16px;
+}
+
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.filter-label {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--slate-500);
+  letter-spacing: 0.5px;
+}
+
+.btn-pill {
+  padding: 5px 12px;
+  border-radius: var(--radius-full);
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--slate-300);
+  background: #fff;
+  color: var(--slate-700);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-pill:hover {
+  background: var(--slate-100);
+  border-color: var(--slate-400);
+}
+
+.btn-pill.active {
+  background: var(--primary-700);
+  border-color: var(--primary-700);
+  color: #fff;
+  box-shadow: 0 1px 3px rgba(4, 120, 87, 0.25);
+}
+
+.summary-strip {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.summary-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #fff;
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--slate-200);
+  font-size: 13px;
+  color: var(--slate-700);
+  box-shadow: var(--shadow-sm);
+}
+
+.summary-item strong {
+  color: var(--slate-900);
+  font-size: 14px;
+  font-weight: 700;
+}

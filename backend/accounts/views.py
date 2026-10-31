@@ -2,7 +2,33 @@ from datetime import datetime
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from rest_framework import exceptions
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from rest_framework_simplejwt.views import TokenObtainPairView
 from .models import User
+
+class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
+    def validate(self, attrs):
+        username = str(attrs.get("username", "")).strip()
+        password = str(attrs.get("password", ""))
+
+        if not username or not password:
+            raise exceptions.AuthenticationFailed("Please enter both username and password.")
+
+        # Case-insensitive username match
+        user = User.objects.filter(username__iexact=username).first()
+        if user and user.check_password(password):
+            if not user.is_active:
+                raise exceptions.AuthenticationFailed("This account has been deactivated.")
+            refresh = self.get_token(user)
+            return {
+                "refresh": str(refresh),
+                "access": str(refresh.access_token),
+            }
+        raise exceptions.AuthenticationFailed("Invalid credentials. Please check your username and password.")
+
+class CustomTokenObtainPairView(TokenObtainPairView):
+    serializer_class = CustomTokenObtainPairSerializer
 
 class Me(APIView):
     permission_classes = [IsAuthenticated]

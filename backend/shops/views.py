@@ -225,3 +225,73 @@ class Employees(APIView):
                 details=f"Generated {count} employee accounts for shop '{s.name}' ({s.code})"
             )
         return Response({"created": made}, status=201)
+
+class EmployeeDetail(APIView):
+    permission_classes = [ManagerOrAdmin]
+
+    def delete(self, r, shop_id, emp_id):
+        try:
+            s = Shop.objects.get(id=shop_id)
+            emp = Employee.objects.select_related("user").get(id=emp_id, shop=s)
+        except (Shop.DoesNotExist, Employee.DoesNotExist):
+            return Response({"detail": "Employee or shop not found."}, status=404)
+
+        if not allowed(r.user, s):
+            return Response({"detail": "Not authorised to manage staff for this shop."}, status=403)
+
+        emp_code = emp.code
+        user = emp.user
+        emp_name = user.first_name if user and user.first_name else emp_code
+
+        with transaction.atomic():
+            emp.delete()
+            if user:
+                user.delete()
+            AuditLog.log_event(
+                user=r.user,
+                action="EMPLOYEE_DELETED",
+                details=f"Deleted employee '{emp_name}' ({emp_code}) from shop '{s.name}' ({s.code})"
+            )
+
+        return Response({"detail": f"Employee {emp_code} deleted successfully."})
+
+class ManagerDetail(APIView):
+    permission_classes = [SuperAdmin]
+
+    def patch(self, r, manager_id):
+        try:
+            m = U.objects.get(id=manager_id, role="MANAGER")
+        except U.DoesNotExist:
+            return Response({"detail": "Manager not found."}, status=404)
+
+        new_pw = str(r.data.get("password", "")).strip()
+        if not new_pw or len(new_pw) < 8:
+            return Response({"detail": "Password must be at least 8 characters long."}, status=400)
+
+        m.set_password(new_pw)
+        m.must_change_password = False
+        m.save()
+
+        AuditLog.log_event(
+            user=r.user,
+            action="MANAGER_PASSWORD_RESET",
+            details=f"Super Admin reset password for manager '{m.username}'"
+        )
+        return Response({"detail": f"Password for manager '{m.username}' updated successfully."})
+
+    def delete(self, r, manager_id):
+        try:
+            m = U.objects.get(id=manager_id, role="MANAGER")
+        except U.DoesNotExist:
+            return Response({"detail": "Manager not found."}, status=404)
+
+        mgr_name = m.username
+        with transaction.atomic():
+            ShopManager.objects.filter(manager=m).delete()
+            m.delete()
+            AuditLog.log_event(
+                user=r.user,
+                action="MANAGER_DELETED",
+                details=f"Deleted manager '{mgr_name}'"
+            )
+        return Response({"detail": f"Manager '{mgr_name}' deleted successfully."})
