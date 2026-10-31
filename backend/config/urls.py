@@ -48,5 +48,6 @@ urlpatterns=[
     path("api/auth/",include("accounts.urls")),
     path("api/",include("shops.urls")),
     path("api/",include("attendance.urls")),
-    path("api/",include("auditlog.urls"))
+    path("api/",include("auditlog.urls")),
+    path("api/leaves/",include("leaves.urls")),
 ]

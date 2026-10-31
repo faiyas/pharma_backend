@@ -28,6 +28,7 @@ INSTALLED_APPS = [
     "shops",
     "attendance",
     "auditlog",
+    "leaves",
 ]
 
 MIDDLEWARE = [

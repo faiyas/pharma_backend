@@ -2207,4 +2207,97 @@ tbody tr:hover {
   justify-content: center;
 }
 
+/* ========================================================================== */
+/* PHARMATRACK V2 COMPONENT STYLES                                           */
+/* ========================================================================== */
+
+.modal-card {
+  background: white;
+  border-radius: var(--radius-lg, 12px);
+  width: min(560px, 94vw);
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  padding: 24px;
+  animation: fadeIn 0.2s ease;
+}
+
+.modal-header .close-btn {
+  background: none;
+  border: none;
+  font-size: 18px;
+  color: var(--slate-400, #94a3b8);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.modal-header .close-btn:hover {
+  color: var(--slate-700, #334155);
+  background: var(--slate-100, #f1f5f9);
+}
+
+.btn-group-pill {
+  display: inline-flex;
+  background: var(--slate-100, #f1f5f9);
+  padding: 3px;
+  border-radius: 9999px;
+  gap: 2px;
+}
+
+.btn-pill {
+  border: none;
+  background: transparent;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--slate-600, #475569);
+  border-radius: 9999px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-pill.active {
+  background: white;
+  color: var(--primary-700, #0f766e);
+  font-weight: 700;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.btn-pill:hover:not(.active) {
+  color: var(--slate-900, #0f172a);
+}
+
+.tab-pane-container {
+  animation: fadeIn 0.2s ease;
+}
+
+/* Pulse animation for live monitoring */
+@keyframes pulseGlow {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+  70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+}
+
+.live-pulse-dot {
+  animation: pulseGlow 2s infinite;
+}
+
+/* Leaflet Map overrides */
+.leaflet-popup-content-wrapper {
+  border-radius: 8px !important;
+  box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1) !important;
+}
+
+.leaflet-popup-content {
+  margin: 12px 14px !important;
+  line-height: 1.5 !important;
+}
+
+.custom-map-marker {
+  background: transparent !important;
+  border: none !important;
+}
+
 
