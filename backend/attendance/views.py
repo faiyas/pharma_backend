@@ -7,7 +7,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from shops.models import Employee, ShopManager
-from .models import Attendance, Event
+from .models import Attendance, Event, AttendancePhoto
 from auditlog.models import AuditLog
 
 def distance(a, b, c, d):
@@ -91,7 +91,7 @@ class Submit(APIView):
 
         dist = distance(s.latitude, s.longitude, lat, lon)
         if dist > s.allowed_radius_m:
-            Event.objects.create(
+            evt = Event.objects.create(
                 employee=e,
                 shop=s,
                 kind=kind,
@@ -101,8 +101,9 @@ class Submit(APIView):
                 distance_m=dist,
                 accepted=False,
                 reason=f"Outside allowed radius ({dist:.1f}m > {s.allowed_radius_m}m)",
-                selfie_data_url=img
+                selfie_data_url=""
             )
+            AttendancePhoto.objects.create(event=evt, image_data=img)
             AuditLog.log_event(
                 user=r.user,
                 action="ATTENDANCE_REJECTED",
@@ -130,7 +131,7 @@ class Submit(APIView):
                 a.check_out = now
             a.save()
 
-            Event.objects.create(
+            evt = Event.objects.create(
                 employee=e,
                 shop=s,
                 kind=kind,
@@ -140,8 +141,9 @@ class Submit(APIView):
                 distance_m=dist,
                 accepted=True,
                 reason="Verified within geofence",
-                selfie_data_url=img
+                selfie_data_url=""
             )
+            AttendancePhoto.objects.create(event=evt, image_data=img)
             AuditLog.log_event(
                 user=r.user,
                 action=f"ATTENDANCE_{kind}",
@@ -225,7 +227,7 @@ class Evidence(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, r):
-        q = Event.objects.select_related("employee__user", "shop")
+        q = Event.objects.select_related("employee__user", "shop", "photo")
         if r.user.role == "EMPLOYEE":
             q = q.filter(employee__user=r.user)
         elif r.user.role == "MANAGER":
@@ -281,7 +283,7 @@ class Evidence(APIView):
                 "distance_m": x.distance_m,
                 "accepted": x.accepted,
                 "reason": x.reason,
-                "selfie": x.selfie_data_url
+                "selfie": x.photo.image_data if hasattr(x, "photo") and x.photo else x.selfie_data_url
             }
             for x in events
         ])
@@ -324,11 +326,12 @@ class EvidencePurge(APIView):
 
         period_desc = month if month else f"{start_date} to {end_date}"
         with transaction.atomic():
-            q.delete()
+            AttendancePhoto.objects.filter(event__in=q).delete()
+            q.update(selfie_data_url="")
             AuditLog.log_event(
                 user=r.user,
                 action="EVIDENCE_PURGED",
-                details=f"Purged {count} evidence records for period: {period_desc}"
+                details=f"Purged {count} evidence selfie photos from dedicated storage for period: {period_desc}"
             )
 
         return Response({
