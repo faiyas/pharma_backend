@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import pharmaLogo from './assets/logo.jpg';
 
 const RAW_API_BASE = import.meta.env.VITE_API_BASE || '';
 const API_BASE = RAW_API_BASE ? `${RAW_API_BASE.replace(/\/$/, '')}/api` : '/api';
@@ -940,11 +941,7 @@ export default function App() {
       <div className="login-page">
         <div className="login-card">
           <div className="login-header">
-            <div className="brand-icon">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
-                <path d="M12 2v20M2 12h20" strokeLinecap="round" />
-              </svg>
-            </div>
+            <img src={pharmaLogo} alt="PharmaTrack Logo" className="login-brand-logo" />
             <h2>PharmaTrack</h2>
             <p>Geofenced Pharmacy Attendance System</p>
           </div>
@@ -1248,18 +1245,17 @@ export default function App() {
       <aside className={`sidebar ${isSidebarCollapsed ? 'collapsed' : ''} ${isMobileSidebarOpen ? 'mobile-open' : ''}`}>
         {/* Sidebar Brand Header */}
         <div className="sidebar-header">
-          <div className="sidebar-brand">
-            <div className="brand-icon">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
-                <path d="M12 2v20M2 12h20" strokeLinecap="round" />
-              </svg>
+          <div
+            className="sidebar-brand"
+            onClick={() => isSidebarCollapsed && setIsSidebarCollapsed(false)}
+            style={{ cursor: isSidebarCollapsed ? 'pointer' : 'default' }}
+            title={isSidebarCollapsed ? 'Click to expand sidebar' : ''}
+          >
+            <img src={pharmaLogo} alt="PharmaTrack" className="brand-logo-img" />
+            <div className="brand-text">
+              <h2>PharmaTrack</h2>
+              <span>Attendance Hub</span>
             </div>
-            {!isSidebarCollapsed && (
-              <div className="brand-text">
-                <h2>PharmaTrack</h2>
-                <span>Attendance Portal</span>
-              </div>
-            )}
           </div>
 
           {/* Desktop Collapse / Expand Toggle */}
@@ -1270,11 +1266,11 @@ export default function App() {
             title={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             aria-label={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
               {isSidebarCollapsed ? (
-                <path d="M9 18l6-6-6-6" />
+                <polyline points="9 18 15 12 9 6" />
               ) : (
-                <path d="M15 18l-6-6 6-6" />
+                <polyline points="15 18 9 12 15 6" />
               )}
             </svg>
           </button>
@@ -1293,7 +1289,7 @@ export default function App() {
 
         {/* Sidebar Navigation Items */}
         <div className="sidebar-nav-container">
-          {!isSidebarCollapsed && <div className="sidebar-section-title">NAVIGATION MENU</div>}
+          <div className="sidebar-section-title">NAVIGATION MENU</div>
           <nav className="sidebar-nav">
             {tabs.map((t) => (
               <button
@@ -1307,7 +1303,7 @@ export default function App() {
                 title={t.label}
               >
                 <span className="sidebar-icon">{t.icon}</span>
-                {!isSidebarCollapsed && <span className="sidebar-label">{t.label}</span>}
+                <span className="sidebar-label">{t.label}</span>
                 {activeTab === t.id && <span className="sidebar-active-indicator" />}
               </button>
             ))}
@@ -1318,17 +1314,15 @@ export default function App() {
         <div className="sidebar-footer">
           <div className="sidebar-user-card">
             <div className="sidebar-avatar">{displayName.charAt(0).toUpperCase()}</div>
-            {!isSidebarCollapsed && (
-              <div className="sidebar-user-meta">
-                <span className="sidebar-user-name" title={displayName}>{displayName}</span>
-                <span className={`role-pill ${user.role === 'SUPER_ADMIN' ? 'super' : user.role === 'MANAGER' ? 'manager' : 'employee'}`}>
-                  {user.role === 'EMPLOYEE' && user.username !== displayName ? `${user.username} · ` : ''}{user.role.replace('_', ' ')}
-                </span>
-              </div>
-            )}
+            <div className="sidebar-user-meta">
+              <span className="sidebar-user-name" title={displayName}>{displayName}</span>
+              <span className={`role-pill ${user.role === 'SUPER_ADMIN' ? 'super' : user.role === 'MANAGER' ? 'manager' : 'employee'}`}>
+                {user.role === 'EMPLOYEE' && user.username !== displayName ? `${user.username} · ` : ''}{user.role.replace('_', ' ')}
+              </span>
+            </div>
           </div>
 
-          <div className={`sidebar-action-row ${isSidebarCollapsed ? 'collapsed' : ''}`}>
+          <div className="sidebar-action-row">
             <button
               type="button"
               className="btn btn-secondary btn-sm sidebar-btn"
@@ -1336,7 +1330,7 @@ export default function App() {
               title="Refresh Data"
             >
               <span style={{ fontSize: 14 }}>↻</span>
-              {!isSidebarCollapsed && <span>Refresh</span>}
+              <span className="sidebar-btn-label">Refresh</span>
             </button>
             <button
               type="button"
@@ -1345,14 +1339,12 @@ export default function App() {
               title="Logout"
             >
               <span style={{ fontSize: 13 }}>⏻</span>
-              {!isSidebarCollapsed && <span>Logout</span>}
+              <span className="sidebar-btn-label">Logout</span>
             </button>
           </div>
-          {!isSidebarCollapsed && (
-            <div className="sidebar-copyright">
-              © {new Date().getFullYear()} 1103techstudios
-            </div>
-          )}
+          <div className="sidebar-copyright">
+            © {new Date().getFullYear()} 1103techstudios
+          </div>
         </div>
       </aside>
 
@@ -1375,11 +1367,7 @@ export default function App() {
             </button>
 
             <div className="mobile-bar-brand" onClick={() => setIsMobileSidebarOpen(true)}>
-              <div className="brand-icon xs">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                  <path d="M12 2v20M2 12h20" strokeLinecap="round" />
-                </svg>
-              </div>
+              <img src={pharmaLogo} alt="PharmaTrack" className="brand-logo-img xs" />
               <span className="mobile-bar-title">{currentTabObj?.label || 'PharmaTrack'}</span>
             </div>
           </div>
@@ -1411,8 +1399,13 @@ export default function App() {
         {/* Desktop Top Header Bar */}
         <header className="desktop-top-bar">
           <div className="top-bar-left">
-            <h2 className="top-bar-page-title">{currentTabObj?.label || 'Dashboard'}</h2>
-            <span className="top-bar-subtitle">Pharmacy Attendance & Geofence Verification</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <img src={pharmaLogo} alt="PharmaTrack" className="brand-logo-img xs" />
+              <div>
+                <h2 className="top-bar-page-title">{currentTabObj?.label || 'Dashboard'}</h2>
+                <span className="top-bar-subtitle">Pharmacy Attendance & Geofence Verification</span>
+              </div>
+            </div>
           </div>
 
           <div className="top-bar-right">
