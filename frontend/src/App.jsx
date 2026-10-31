@@ -46,7 +46,15 @@ async function apiReq(path, opts = {}) {
   const res = await fetch(`${API_BASE}${path}`, { ...opts, headers });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const err = data.detail || (typeof data === 'object' ? JSON.stringify(data) : 'Request failed');
+    let err = data.detail || data.message || data.error;
+    if (!err && typeof data === 'object' && Object.keys(data).length > 0) {
+      err = Object.entries(data)
+        .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : typeof v === 'object' ? JSON.stringify(v) : v}`)
+        .join(' | ');
+    }
+    if (!err) {
+      err = `Server error (${res.status}: ${res.statusText || 'Request failed'})`;
+    }
     throw new Error(err);
   }
   return data;

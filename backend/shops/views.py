@@ -243,17 +243,27 @@ class EmployeeDetail(APIView):
         user = emp.user
         emp_name = user.first_name if user and user.first_name else emp_code
 
-        with transaction.atomic():
-            emp.delete()
-            if user:
-                user.delete()
-            AuditLog.log_event(
-                user=r.user,
-                action="EMPLOYEE_DELETED",
-                details=f"Deleted employee '{emp_name}' ({emp_code}) from shop '{s.name}' ({s.code})"
-            )
+        try:
+            with transaction.atomic():
+                from attendance.models import Attendance, Event, AttendancePhoto
+                # Clean up associated photos, events, and attendance records to prevent ProtectedError
+                AttendancePhoto.objects.filter(event__employee=emp).delete()
+                Event.objects.filter(employee=emp).delete()
+                Attendance.objects.filter(employee=emp).delete()
 
-        return Response({"detail": f"Employee {emp_code} deleted successfully."})
+                emp.delete()
+                if user:
+                    user.delete()
+
+                AuditLog.log_event(
+                    user=r.user,
+                    action="EMPLOYEE_DELETED",
+                    details=f"Deleted employee '{emp_name}' ({emp_code}) from shop '{s.name}' ({s.code})"
+                )
+
+            return Response({"detail": f"Employee {emp_code} deleted successfully."})
+        except Exception as e:
+            return Response({"detail": f"Failed to delete employee: {str(e)}"}, status=500)
 
 class ManagerDetail(APIView):
     permission_classes = [SuperAdmin]
