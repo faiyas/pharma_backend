@@ -86,3 +86,25 @@ class LeaveManagementTestCase(TestCase):
         # Verify LeaveBalance updated
         balance = LeaveBalance.objects.get(employee=self.emp, year=start.year)
         self.assertEqual(balance.casual_used, 2)
+
+    def test_manager_and_admin_cannot_apply_leave(self):
+        start = date.today() + timedelta(days=20)
+        end = date.today() + timedelta(days=22)
+        payload = {
+            "leave_type": "Casual Leave",
+            "start_date": start.isoformat(),
+            "end_date": end.isoformat(),
+            "reason": "Manager attempting leave",
+        }
+
+        # Manager should be forbidden from applying
+        self.client.force_authenticate(user=self.manager)
+        res_mgr = self.client.post("/api/leaves/", payload)
+        self.assertEqual(res_mgr.status_code, 403)
+        self.assertIn("Only employees can apply for leave", res_mgr.data["detail"])
+
+        # Admin should also be forbidden from applying
+        self.client.force_authenticate(user=self.admin)
+        res_adm = self.client.post("/api/leaves/", payload)
+        self.assertEqual(res_adm.status_code, 403)
+        self.assertIn("Only employees can apply for leave", res_adm.data["detail"])

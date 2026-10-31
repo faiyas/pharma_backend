@@ -3,11 +3,12 @@ import re
 import base64
 from django.utils import timezone
 from django.db import transaction
+from django.db.models import Q
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from shops.models import Employee, ShopManager
-from .models import Attendance, Event, AttendancePhoto
+from shops.models import Shop, Employee, ShopManager
+from .models import Attendance, Event, AttendancePhoto, AttendanceCorrection, MonthlyExportLog
 from auditlog.models import AuditLog
 
 def distance(a, b, c, d):
@@ -18,6 +19,13 @@ def distance(a, b, c, d):
     dl = math.radians(d - b)
     x = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
     return 2 * R * math.asin(math.sqrt(x))
+
+def can_manage_attendance_shop(user, shop):
+    if user.role == "SUPER_ADMIN":
+        return True
+    if user.role == "MANAGER":
+        return ShopManager.objects.filter(manager=user, shop=shop).exists()
+    return False
 
 class TodayStatus(APIView):
     permission_classes = [IsAuthenticated]
@@ -117,7 +125,9 @@ class Submit(APIView):
 
         today = timezone.localdate()
         with transaction.atomic():
-            a, _ = Attendance.objects.select_for_update().get_or_create(employee=e, work_date=today, defaults={"shop": s})
+            a, _ = Attendance.objects.select_for_update().get_or_create(
+                employee=e, work_date=today, defaults={"shop": s, "status": "PENDING"}
+            )
             now = timezone.now()
             if kind == "CHECK_IN":
                 if a.check_in:
@@ -201,7 +211,12 @@ class Records(APIView):
         if day_of_week and day_of_week.isdigit():
             q = q.filter(work_date__week_day=int(day_of_week))
 
-        records = q.order_by("-work_date", "-id")[:1000]
+        # Filter by status (PENDING, APPROVED, REJECTED)
+        status = r.query_params.get("status")
+        if status:
+            q = q.filter(status=status.upper())
+
+        records = q.select_related("reviewed_by").order_by("-work_date", "-id")[:1000]
         out = []
         for a in records:
             hours = None
@@ -220,8 +235,84 @@ class Records(APIView):
                 "check_in": a.check_in.isoformat() if a.check_in else None,
                 "check_out": a.check_out.isoformat() if a.check_out else None,
                 "hours_worked": hours,
+                "status": a.status,
+                "reviewed_by": a.reviewed_by.username if a.reviewed_by else None,
+                "review_comments": a.review_comments,
+                "reviewed_at": a.reviewed_at.isoformat() if a.reviewed_at else None,
             })
         return Response(out)
+
+class AttendanceApproveView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            att = Attendance.objects.select_related("employee__user", "shop").get(pk=pk)
+        except Attendance.DoesNotExist:
+            return Response({"detail": "Attendance record not found."}, status=404)
+
+        user = request.user
+        if not can_manage_attendance_shop(user, att.shop):
+            return Response({"detail": "Not authorized to accept attendance for this branch."}, status=403)
+
+        comments = str(request.data.get("comments", "")).strip()
+
+        with transaction.atomic():
+            att.status = "APPROVED"
+            att.reviewed_by = user
+            att.review_comments = comments
+            att.reviewed_at = timezone.now()
+            att.save()
+
+            AuditLog.log_event(
+                user=user,
+                action="ATTENDANCE_APPROVED",
+                details=f"Attendance #{att.id} for {att.employee.code} on {att.work_date} accepted by {user.username}."
+            )
+
+        return Response({
+            "detail": f"Attendance for {att.employee.code} accepted/approved.",
+            "id": att.id,
+            "status": att.status,
+            "reviewed_by": user.username,
+            "reviewed_at": att.reviewed_at.isoformat(),
+        })
+
+class AttendanceRejectView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            att = Attendance.objects.select_related("employee__user", "shop").get(pk=pk)
+        except Attendance.DoesNotExist:
+            return Response({"detail": "Attendance record not found."}, status=404)
+
+        user = request.user
+        if not can_manage_attendance_shop(user, att.shop):
+            return Response({"detail": "Not authorized to review attendance for this branch."}, status=403)
+
+        comments = str(request.data.get("comments", "")).strip()
+
+        with transaction.atomic():
+            att.status = "REJECTED"
+            att.reviewed_by = user
+            att.review_comments = comments
+            att.reviewed_at = timezone.now()
+            att.save()
+
+            AuditLog.log_event(
+                user=user,
+                action="ATTENDANCE_REJECTED",
+                details=f"Attendance #{att.id} for {att.employee.code} on {att.work_date} rejected by {user.username}. Reason: {comments}"
+            )
+
+        return Response({
+            "detail": f"Attendance for {att.employee.code} rejected.",
+            "id": att.id,
+            "status": att.status,
+            "reviewed_by": user.username,
+            "reviewed_at": att.reviewed_at.isoformat(),
+        })
 
 class Evidence(APIView):
     permission_classes = [IsAuthenticated]
@@ -288,53 +379,162 @@ class Evidence(APIView):
             for x in events
         ])
 
-class EvidencePurge(APIView):
+class MonthlyExportRecordView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        month = request.query_params.get("month")
+        if not month:
+            return Response({"detail": "month parameter (YYYY-MM) is required."}, status=400)
+
+        shop_id = request.query_params.get("shop_id")
+        qs = MonthlyExportLog.objects.filter(month=month)
+        if shop_id:
+            qs = qs.filter(Q(shop_id=shop_id) | Q(shop__isnull=True))
+
+        has_exported = qs.exists()
+        last_log = qs.first()
+
+        try:
+            yr, mo = month.split("-")
+            att_qs = Attendance.objects.filter(work_date__year=int(yr), work_date__month=int(mo))
+            evt_qs = Event.objects.filter(created_at__year=int(yr), created_at__month=int(mo))
+            if request.user.role == "MANAGER":
+                managed_shops = Shop.objects.filter(manager_links__manager=request.user)
+                att_qs = att_qs.filter(shop__in=managed_shops)
+                evt_qs = evt_qs.filter(shop__in=managed_shops)
+            if shop_id:
+                att_qs = att_qs.filter(shop_id=shop_id)
+                evt_qs = evt_qs.filter(shop_id=shop_id)
+            att_count = att_qs.count()
+            evt_count = evt_qs.count()
+        except ValueError:
+            att_count = 0
+            evt_count = 0
+
+        return Response({
+            "month": month,
+            "has_exported": has_exported,
+            "export_count": qs.count(),
+            "last_exported_at": last_log.exported_at.isoformat() if last_log else None,
+            "exported_by": last_log.exported_by.username if last_log and last_log.exported_by else None,
+            "attendance_count": att_count,
+            "event_count": evt_count
+        })
+
+    def post(self, request):
+        if request.user.role not in ("SUPER_ADMIN", "MANAGER"):
+            return Response({"detail": "Only Super Admins and Managers can record exports."}, status=403)
+
+        month = request.data.get("month")
+        if not month:
+            return Response({"detail": "month is required."}, status=400)
+
+        shop_id = request.data.get("shop_id")
+        export_type = request.data.get("export_type", "AUDIT_DOSSIER")
+        shop = None
+        if shop_id:
+            try:
+                shop = Shop.objects.get(id=shop_id)
+            except Shop.DoesNotExist:
+                pass
+
+        log = MonthlyExportLog.objects.create(
+            month=month,
+            shop=shop,
+            exported_by=request.user,
+            export_type=export_type
+        )
+
+        AuditLog.log_event(
+            user=request.user,
+            action="MONTHLY_DATA_EXPORTED",
+            details=f"Exported {export_type} report for month {month} (Shop: {shop.name if shop else 'All Branches'})."
+        )
+
+        return Response({
+            "detail": f"Export recorded for {month}.",
+            "month": month,
+            "exported_at": log.exported_at.isoformat(),
+            "has_exported": True
+        }, status=201)
+
+class MonthlyDataPurgeView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, r):
         if r.user.role not in ("SUPER_ADMIN", "MANAGER"):
-            return Response({"detail": "Only Super Admins and Managers can purge evidence."}, status=403)
+            return Response({"detail": "Only Super Admins and Managers can delete monthly attendance data."}, status=403)
 
-        q = Event.objects.all()
-        if r.user.role == "MANAGER":
-            q = q.filter(shop__manager_links__manager=r.user)
+        month = r.data.get("month")
+        if not month:
+            return Response({"detail": "Please specify a month (YYYY-MM) to delete data."}, status=400)
+
+        try:
+            yr, mo = month.split("-")
+            yr = int(yr)
+            mo = int(mo)
+        except ValueError:
+            return Response({"detail": "Invalid month format. Expected YYYY-MM."}, status=400)
 
         shop_id = r.data.get("shop_id")
+
+        # Pre-condition: Check if data for this month has been exported at least once
+        export_qs = MonthlyExportLog.objects.filter(month=month)
         if shop_id:
-            q = q.filter(shop_id=shop_id)
+            export_qs = export_qs.filter(Q(shop_id=shop_id) | Q(shop__isnull=True))
 
-        month = r.data.get("month") # format 'YYYY-MM'
-        start_date = r.data.get("start_date")
-        end_date = r.data.get("end_date")
+        if not export_qs.exists():
+            return Response({
+                "detail": f"Data for {month} must be exported at least once before deletion. Please download the report first. (Recommendation: Purge data every 6 months).",
+                "code": "EXPORT_REQUIRED",
+                "has_exported": False
+            }, status=400)
 
-        if month:
-            try:
-                yr, mo = month.split("-")
-                q = q.filter(created_at__year=int(yr), created_at__month=int(mo))
-            except ValueError:
-                return Response({"detail": "Invalid month format. Expected YYYY-MM."}, status=400)
-        elif start_date and end_date:
-            q = q.filter(created_at__date__gte=start_date, created_at__date__lte=end_date)
-        elif start_date:
-            q = q.filter(created_at__date=start_date)
-        else:
-            return Response({"detail": "Please specify a month (YYYY-MM) or date range to purge."}, status=400)
+        # Build querysets for all data in this month
+        att_qs = Attendance.objects.filter(work_date__year=yr, work_date__month=mo)
+        evt_qs = Event.objects.filter(created_at__year=yr, created_at__month=mo)
+        corr_qs = AttendanceCorrection.objects.filter(attendance_date__year=yr, attendance_date__month=mo)
 
-        count = q.count()
-        if count == 0:
-            return Response({"detail": "No evidence records found for the specified period.", "purged_count": 0})
+        if r.user.role == "MANAGER":
+            managed_shops = Shop.objects.filter(manager_links__manager=r.user)
+            att_qs = att_qs.filter(shop__in=managed_shops)
+            evt_qs = evt_qs.filter(shop__in=managed_shops)
+            corr_qs = corr_qs.filter(shop__in=managed_shops)
 
-        period_desc = month if month else f"{start_date} to {end_date}"
+        if shop_id:
+            att_qs = att_qs.filter(shop_id=shop_id)
+            evt_qs = evt_qs.filter(shop_id=shop_id)
+            corr_qs = corr_qs.filter(shop_id=shop_id)
+
+        att_count = att_qs.count()
+        evt_count = evt_qs.count()
+        corr_count = corr_qs.count()
+
+        if att_count == 0 and evt_count == 0:
+            return Response({"detail": f"No attendance or evidence records found for {month}.", "deleted_attendance": 0, "deleted_events": 0})
+
         with transaction.atomic():
-            AttendancePhoto.objects.filter(event__in=q).delete()
-            q.update(selfie_data_url="")
+            # Delete photos and events
+            AttendancePhoto.objects.filter(event__in=evt_qs).delete()
+            evt_qs.delete()
+            # Delete corrections and adjustments
+            corr_qs.delete()
+            # Delete all attendance records
+            att_qs.delete()
+
             AuditLog.log_event(
                 user=r.user,
-                action="EVIDENCE_PURGED",
-                details=f"Purged {count} evidence selfie photos from dedicated storage for period: {period_desc}"
+                action="MONTHLY_DATA_PURGED",
+                details=f"Permanently purged all data for {month}: {att_count} attendance records, {evt_count} event photos, and {corr_count} corrections."
             )
 
         return Response({
-            "detail": f"Successfully purged {count} evidence photo records for {period_desc}. Attendance check-in/out records remain preserved.",
-            "purged_count": count
+            "detail": f"Successfully deleted all {att_count} attendance records, {evt_count} events/photos, and {corr_count} corrections for {month}.",
+            "deleted_attendance": att_count,
+            "deleted_events": evt_count,
+            "month": month
         })
+
+# Alias for backwards compatibility
+EvidencePurge = MonthlyDataPurgeView

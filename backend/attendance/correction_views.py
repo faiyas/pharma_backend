@@ -75,23 +75,14 @@ class AttendanceCorrectionListCreateView(APIView):
         user = request.user
         d = request.data
 
-        if user.role == "EMPLOYEE":
-            try:
-                emp = Employee.objects.get(user=user)
-            except Employee.DoesNotExist:
-                return Response({"detail": "Employee profile not found."}, status=400)
-            shop = emp.shop
-        else:
-            emp_id = d.get("employee_id") or d.get("employee")
-            if not emp_id:
-                return Response({"detail": "employee_id is required."}, status=400)
-            try:
-                emp = Employee.objects.get(id=emp_id)
-            except Employee.DoesNotExist:
-                return Response({"detail": "Employee not found."}, status=404)
-            if not can_manage_attendance_shop(user, emp.shop):
-                return Response({"detail": "Forbidden."}, status=403)
-            shop = emp.shop
+        if user.role != "EMPLOYEE":
+            return Response({"detail": "Only employees can request attendance corrections."}, status=403)
+
+        try:
+            emp = Employee.objects.get(user=user)
+        except Employee.DoesNotExist:
+            return Response({"detail": "Employee profile not found."}, status=400)
+        shop = emp.shop
 
         attendance_date_str = d.get("attendance_date")
         event_type = str(d.get("event_type", "CHECK_IN")).strip().upper()

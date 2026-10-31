@@ -62,6 +62,22 @@ export default function ReportExports({ user, shops, addToast, apiReq }) {
       window.URL.revokeObjectURL(downloadUrl);
 
       addToast(`Report downloaded successfully (.${exportFormat})!`, 'success');
+
+      if (startDate) {
+        const mo = startDate.slice(0, 7);
+        fetch(`${API_BASE}/attendance/monthly-export-record/`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            month: mo,
+            ...(selectedBranch ? { shop_id: selectedBranch } : {}),
+            export_type: reportType.toUpperCase(),
+          }),
+        }).catch(() => {});
+      }
     } catch (err) {
       addToast(err.message || 'Failed to download report.', 'error');
     } finally {

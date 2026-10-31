@@ -3,11 +3,27 @@ from django.db import models
 from shops.models import Shop, Employee
 
 class Attendance(models.Model):
+    STATUS_CHOICES = [
+        ("PENDING", "Pending"),
+        ("APPROVED", "Approved"),
+        ("REJECTED", "Rejected"),
+    ]
+
     employee = models.ForeignKey(Employee, on_delete=models.PROTECT)
     shop = models.ForeignKey(Shop, on_delete=models.PROTECT)
     work_date = models.DateField()
     check_in = models.DateTimeField(null=True, blank=True)
     check_out = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="PENDING")
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reviewed_attendances"
+    )
+    review_comments = models.TextField(blank=True, default="")
+    reviewed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         unique_together = ("employee", "work_date")
@@ -125,4 +141,23 @@ class AttendanceAdjustment(models.Model):
 
     def __str__(self):
         return f"Adjustment for {self.attendance} ({self.field_name}): {self.old_value} -> {self.new_value}"
+
+class MonthlyExportLog(models.Model):
+    month = models.CharField(max_length=7)  # YYYY-MM
+    shop = models.ForeignKey(Shop, on_delete=models.CASCADE, null=True, blank=True)
+    exported_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True
+    )
+    exported_at = models.DateTimeField(auto_now_add=True)
+    export_type = models.CharField(max_length=50, default="AUDIT_DOSSIER")
+
+    class Meta:
+        ordering = ["-exported_at"]
+        db_table = "attendance_monthly_export_log"
+
+    def __str__(self):
+        return f"Export for {self.month} by {self.exported_by} on {self.exported_at}"
 

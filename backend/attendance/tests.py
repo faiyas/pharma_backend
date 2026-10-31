@@ -156,3 +156,126 @@ class V2FullStackTestCase(TestCase):
         res_csv = self.client.get("/api/reports/export/?report_type=daily_attendance&format=csv")
         self.assertEqual(res_csv.status_code, 200)
         self.assertEqual(res_csv["Content-Type"], "text/csv")
+
+    def test_manager_and_admin_cannot_request_correction_or_punch(self):
+        correction_payload = {
+            "attendance_date": date.today().isoformat(),
+            "event_type": "CHECK_IN",
+            "requested_timestamp": timezone.now().isoformat(),
+            "reason": "Manager test",
+        }
+
+        # Manager cannot request correction
+        self.client.force_authenticate(user=self.manager)
+        res_mgr = self.client.post("/api/attendance-corrections/", correction_payload)
+        self.assertEqual(res_mgr.status_code, 403)
+        self.assertIn("Only employees can request attendance corrections", res_mgr.data["detail"])
+
+        # Admin cannot request correction
+        self.client.force_authenticate(user=self.admin)
+        res_adm = self.client.post("/api/attendance-corrections/", correction_payload)
+        self.assertEqual(res_adm.status_code, 403)
+        self.assertIn("Only employees can request attendance corrections", res_adm.data["detail"])
+
+        # Manager cannot punch attendance
+        punch_payload = {
+            "event_type": "CHECK_IN",
+            "latitude": 12.9716,
+            "longitude": 77.5946,
+            "gps_accuracy_m": 5.0,
+            "selfie_data_url": "data:image/jpeg;base64,/9j/4AAQSkZJRg==",
+        }
+        res_punch = self.client.post("/api/attendance/submit/", punch_payload)
+        self.assertEqual(res_punch.status_code, 403)
+
+    def test_attendance_acceptance_and_rejection_by_manager_and_admin(self):
+        work_date = date.today()
+        orig_in = timezone.now()
+        att = Attendance.objects.create(
+            employee=self.emp,
+            shop=self.shop1,
+            work_date=work_date,
+            check_in=orig_in,
+            status="PENDING"
+        )
+
+        # 1. Employee cannot approve/accept attendance
+        self.client.force_authenticate(user=self.emp_user)
+        emp_res = self.client.post(f"/api/attendance/{att.id}/approve/")
+        self.assertEqual(emp_res.status_code, 403)
+
+        # 2. Manager accepts attendance
+        self.client.force_authenticate(user=self.manager)
+        mgr_res = self.client.post(f"/api/attendance/{att.id}/accept/", {"comments": "Verified check-in"})
+        self.assertEqual(mgr_res.status_code, 200)
+        self.assertEqual(mgr_res.data["status"], "APPROVED")
+        att.refresh_from_db()
+        self.assertEqual(att.status, "APPROVED")
+        self.assertEqual(att.reviewed_by, self.manager)
+
+        # 3. Admin can reject attendance
+        self.client.force_authenticate(user=self.admin)
+        adm_res = self.client.post(f"/api/attendance/{att.id}/reject/", {"comments": "Discrepancy observed"})
+        self.assertEqual(adm_res.status_code, 200)
+        self.assertEqual(adm_res.data["status"], "REJECTED")
+        att.refresh_from_db()
+        self.assertEqual(att.status, "REJECTED")
+        self.assertEqual(att.reviewed_by, self.admin)
+
+    def test_monthly_data_purge_requires_export_first(self):
+        test_date = date(2026, 6, 15)
+        test_month = "2026-06"
+        att = Attendance.objects.create(
+            employee=self.emp,
+            shop=self.shop1,
+            work_date=test_date,
+            check_in=datetime(2026, 6, 15, 9, 0, tzinfo=timezone.utc),
+            check_out=datetime(2026, 6, 15, 17, 0, tzinfo=timezone.utc),
+            status="APPROVED"
+        )
+        evt = Event.objects.create(
+            employee=self.emp,
+            shop=self.shop1,
+            kind="CHECK_IN",
+            latitude=12.9716,
+            longitude=77.5946,
+            accuracy_m=5.0,
+            distance_m=10.0,
+            accepted=True
+        )
+        Event.objects.filter(id=evt.id).update(created_at=datetime(2026, 6, 15, 9, 0, tzinfo=timezone.utc))
+
+        # 1. Purge WITHOUT export -> Must be rejected with 400 EXPORT_REQUIRED
+        self.client.force_authenticate(user=self.manager)
+        purge_res1 = self.client.post("/api/attendance/monthly-purge/", {
+            "month": test_month
+        })
+        self.assertEqual(purge_res1.status_code, 400)
+        self.assertEqual(purge_res1.data["code"], "EXPORT_REQUIRED")
+        self.assertIn("must be exported at least once", purge_res1.data["detail"])
+        self.assertTrue(Attendance.objects.filter(id=att.id).exists())
+
+        # 2. Check export status endpoint
+        status_res = self.client.get(f"/api/attendance/monthly-export-record/?month={test_month}")
+        self.assertEqual(status_res.status_code, 200)
+        self.assertFalse(status_res.data["has_exported"])
+
+        # 3. Record export for this month
+        exp_res = self.client.post("/api/attendance/monthly-export-record/", {
+            "month": test_month,
+            "export_type": "AUDIT_DOSSIER"
+        })
+        self.assertEqual(exp_res.status_code, 201)
+        self.assertTrue(exp_res.data["has_exported"])
+
+        # Check export status again
+        status_res2 = self.client.get(f"/api/attendance/monthly-export-record/?month={test_month}")
+        self.assertTrue(status_res2.data["has_exported"])
+
+        # 4. Purge with export verified -> Must succeed and erase all records
+        purge_res2 = self.client.post("/api/attendance/monthly-purge/", {
+            "month": test_month
+        })
+        self.assertEqual(purge_res2.status_code, 200)
+        self.assertEqual(purge_res2.data["deleted_attendance"], 1)
+        self.assertFalse(Attendance.objects.filter(work_date__year=2026, work_date__month=6).exists())

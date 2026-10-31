@@ -54,25 +54,14 @@ class LeaveRequestListCreateView(APIView):
         user = request.user
         data = request.data
 
-        # Determine target employee
-        if user.role == "EMPLOYEE":
-            try:
-                emp = Employee.objects.get(user=user)
-            except Employee.DoesNotExist:
-                return Response({"detail": "Employee profile not found for current user."}, status=400)
-            shop = emp.shop
-        else:
-            # Super Admin or Manager applying on behalf of employee
-            emp_id = data.get("employee_id") or data.get("employee")
-            if not emp_id:
-                return Response({"detail": "employee_id is required."}, status=400)
-            try:
-                emp = Employee.objects.get(id=emp_id)
-            except Employee.DoesNotExist:
-                return Response({"detail": "Invalid employee ID."}, status=404)
-            if not can_manage_shop(user, emp.shop):
-                return Response({"detail": "You do not have permission to manage this employee's shop."}, status=403)
-            shop = emp.shop
+        if user.role != "EMPLOYEE":
+            return Response({"detail": "Only employees can apply for leave."}, status=403)
+
+        try:
+            emp = Employee.objects.get(user=user)
+        except Employee.DoesNotExist:
+            return Response({"detail": "Employee profile not found for current user."}, status=400)
+        shop = emp.shop
 
         leave_type = data.get("leave_type", "Casual Leave").strip()
         start_date_str = data.get("start_date")

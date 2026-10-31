@@ -143,13 +143,15 @@ export default function AttendanceCorrection({ user, shops, addToast, apiReq }) 
             >
               ↻ Refresh
             </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => setShowRequestModal(true)}
-            >
-              + Request Correction
-            </button>
+            {isEmployee && (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setShowRequestModal(true)}
+              >
+                + Request Correction
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -343,9 +345,9 @@ export default function AttendanceCorrection({ user, shops, addToast, apiReq }) 
       </div>
 
       {/* ================================================================== */}
-      {/* MODAL: REQUEST ATTENDANCE CORRECTION                               */}
+      {/* MODAL: REQUEST ATTENDANCE CORRECTION (EMPLOYEE ONLY)               */}
       {/* ================================================================== */}
-      {showRequestModal && (
+      {isEmployee && showRequestModal && (
         <div className="modal-overlay" onClick={() => setShowRequestModal(false)}>
           <div className="modal-card" style={{ maxWidth: 500 }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">

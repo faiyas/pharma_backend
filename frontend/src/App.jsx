@@ -411,12 +411,18 @@ export default function App() {
   const [filterMonth, setFilterMonth] = useState(new Date().toISOString().slice(0, 7));
   const [filterDayOfWeek, setFilterDayOfWeek] = useState('');
   const [evidenceFilterStatus, setEvidenceFilterStatus] = useState('all');
+  const [filterAttStatus, setFilterAttStatus] = useState('all');
+  const [attReviewModal, setAttReviewModal] = useState(null); // { attendance, action: 'approve' | 'reject' }
+  const [attReviewComments, setAttReviewComments] = useState('');
+  const [isSubmittingAttReview, setIsSubmittingAttReview] = useState(false);
 
   // Modals: Manager Password Reset
   const [resetManagerModal, setResetManagerModal] = useState(null);
   const [resetManagerPass, setResetManagerPass] = useState('');
   const [isResettingPass, setIsResettingPass] = useState(false);
-  const [isPurgingEvidence, setIsPurgingEvidence] = useState(false);
+  const [isMonthExported, setIsMonthExported] = useState(false);
+  const [isExportingDossier, setIsExportingDossier] = useState(false);
+  const [isDeletingMonthData, setIsDeletingMonthData] = useState(false);
 
   // Toasts
   const [toasts, setToasts] = useState([]);
@@ -490,10 +496,30 @@ export default function App() {
         const logs = await apiReq('/auditlog/').catch(() => []);
         setAuditLogs(logs);
       }
+
+      if (currentUser.role !== 'EMPLOYEE') {
+        checkMonthExportStatus(targetMo, filterShop);
+      }
     } catch (err) {
       console.error('Error refreshing data:', err);
     }
   }
+
+  async function checkMonthExportStatus(month, shop) {
+    if (!month) return;
+    try {
+      const res = await apiReq(`/attendance/monthly-export-record/?month=${month}${shop ? `&shop_id=${shop}` : ''}`);
+      setIsMonthExported(Boolean(res?.has_exported));
+    } catch {
+      setIsMonthExported(false);
+    }
+  }
+
+  useEffect(() => {
+    if (user && user.role !== 'EMPLOYEE' && filterMonth) {
+      checkMonthExportStatus(filterMonth, filterShop);
+    }
+  }, [filterMonth, filterShop, user]);
 
   // Handle Login
   async function handleLogin(e) {
@@ -846,6 +872,27 @@ export default function App() {
     }
   }
 
+  // Manager or Super Admin: Accept / Approve or Reject Attendance
+  async function handleAttendanceReviewAction() {
+    if (!attReviewModal) return;
+    setIsSubmittingAttReview(true);
+    try {
+      const endpoint = `/attendance/${attReviewModal.attendance.id}/${attReviewModal.action}/`;
+      const res = await apiReq(endpoint, {
+        method: 'POST',
+        body: JSON.stringify({ comments: attReviewComments.trim() }),
+      });
+      addToast(res.detail || `Attendance record ${attReviewModal.action === 'approve' ? 'accepted' : 'rejected'}.`, 'success');
+      setAttReviewModal(null);
+      setAttReviewComments('');
+      await loadAllData(user);
+    } catch (err) {
+      addToast(err.message || 'Failed to review attendance.', 'error');
+    } finally {
+      setIsSubmittingAttReview(false);
+    }
+  }
+
   // Helper: Month-End Verification & Availability Check
   function getMonthEndStatus(monthStr) {
     const target = monthStr || new Date().toISOString().slice(0, 7);
@@ -1041,16 +1088,10 @@ export default function App() {
 </html>`;
   }
 
-  // Manager or Super Admin: Month-End Export Audit Dossier & Auto-Purge Evidence
-  async function handleExportAuditPackageAndPurge(targetMonth) {
+  // Manager or Super Admin: Export Offline HTML Audit Dossier (Available Anytime)
+  async function handleExportAuditPackage(targetMonth) {
     const month = targetMonth || filterMonth || new Date().toISOString().slice(0, 7);
-    const status = getMonthEndStatus(month);
-    if (!status.isAvailable) {
-      addToast(status.reason || 'Auto-purge is available only at month end.', 'warning');
-      return;
-    }
-
-    setIsPurgingEvidence(true);
+    setIsExportingDossier(true);
     try {
       // 1. Fetch complete records with photos for target month
       const evidenceData = await apiReq(
@@ -1059,22 +1100,7 @@ export default function App() {
 
       if (!evidenceData || !evidenceData.length) {
         addToast(`No evidence records found for ${month} to export.`, 'info');
-        setIsPurgingEvidence(false);
-        return;
-      }
-
-      const photosCount = evidenceData.filter((r) => !!r.selfie).length;
-      const confirmMsg =
-        `📋 MONTH-END AUDIT EXPORT & AUTO-PURGE (${month})\n\n` +
-        `• Total Records: ${evidenceData.length} verification events\n` +
-        `• Active Photos: ${photosCount} selfie images\n\n` +
-        `1. An offline Audit Dossier (.html) with ALL images embedded will be downloaded to your device.\n` +
-        `2. Database selfie photos for ${month} will be AUTOMATICALLY purged immediately after export to free storage.\n` +
-        `3. All attendance hours, timestamps, and GPS logs remain 100% permanently preserved.\n\n` +
-        `Proceed with Export & Auto-Purge?`;
-
-      if (!window.confirm(confirmMsg)) {
-        setIsPurgingEvidence(false);
+        setIsExportingDossier(false);
         return;
       }
 
@@ -1090,23 +1116,68 @@ export default function App() {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
 
-      // 3. Automatically purge from database now that export is secured
-      const purgeRes = await apiReq('/attendance/evidence/purge/', {
+      // 3. Record that this month was successfully exported
+      await apiReq('/attendance/monthly-export-record/', {
+        method: 'POST',
+        body: JSON.stringify({
+          month,
+          ...(filterShop ? { shop_id: filterShop } : {}),
+          export_type: 'AUDIT_DOSSIER',
+        }),
+      }).catch(() => {});
+
+      setIsMonthExported(true);
+      addToast(
+        `Audit Dossier for ${month} downloaded successfully! You can export anytime as needed.`,
+        'success'
+      );
+    } catch (err) {
+      addToast(err.message || 'Export failed.', 'error');
+    } finally {
+      setIsExportingDossier(false);
+    }
+  }
+
+  // Manager or Super Admin: Delete All Attendance Records & Photos for Selected Month
+  async function handleDeleteMonthData(targetMonth) {
+    const month = targetMonth || filterMonth || new Date().toISOString().slice(0, 7);
+
+    // Guard: Must be exported at least once before deletion
+    if (!isMonthExported) {
+      addToast(
+        `Report Required: Data for ${month} must be exported at least once before deletion. Please click "Export Audit Dossier" first. (Recommendation: Purge data every 6 months).`,
+        'warning'
+      );
+      return;
+    }
+
+    const confirmMsg =
+      `⚠️ PERMANENT ATTENDANCE & EVIDENCE DATA DELETION (${month})\n\n` +
+      `This will completely erase ALL attendance records, check-in/out timestamps, corrections, and selfie photos for ${month}.\n\n` +
+      `✓ Verified: This month's report has been exported.\n\n` +
+      `Are you sure you want to permanently delete all data for ${month}? This action CANNOT be undone.\n\n` +
+      `(Recommendation: Take report and purge data every 6 months).`;
+
+    if (!window.confirm(confirmMsg)) return;
+
+    setIsDeletingMonthData(true);
+    try {
+      const res = await apiReq('/attendance/monthly-purge/', {
         method: 'POST',
         body: JSON.stringify({ month, ...(filterShop ? { shop_id: filterShop } : {}) }),
       });
 
       addToast(
-        `Audit Dossier downloaded! ${purgeRes.purged_count || 0} evidence photos have been automatically purged from database.`,
+        res.detail || `All attendance records and evidence for ${month} have been permanently deleted.`,
         'success'
       );
 
-      // 4. Reload latest data
+      setIsMonthExported(false);
       await loadAllData(user);
     } catch (err) {
-      addToast(err.message || 'Export or purge failed.', 'error');
+      addToast(err.message || 'Failed to delete month data.', 'error');
     } finally {
-      setIsPurgingEvidence(false);
+      setIsDeletingMonthData(false);
     }
   }
 
@@ -1133,6 +1204,7 @@ export default function App() {
       setFilterEndDate('');
       setFilterMonth('');
       setFilterDayOfWeek('');
+      setFilterAttStatus('all');
     }
   }
 
@@ -1155,6 +1227,7 @@ export default function App() {
       'Check Out Time',
       'Hours Worked',
       'Shift Status',
+      'Approval Status',
     ];
     const rows = listToExport.map((r) => {
       const dayName = new Date(r.date).toLocaleDateString('en-US', { weekday: 'long' });
@@ -1171,6 +1244,7 @@ export default function App() {
         `"${r.check_out ? new Date(r.check_out).toLocaleTimeString() : 'N/A'}"`,
         `"${r.hours_worked !== undefined && r.hours_worked !== null ? r.hours_worked + ' hrs' : 'N/A'}"`,
         `"${status}"`,
+        `"${r.status || 'PENDING'}"`,
       ];
     });
     const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
@@ -1183,6 +1257,14 @@ export default function App() {
     link.click();
     document.body.removeChild(link);
     addToast('Monthly attendance report exported successfully!', 'success');
+
+    const monthForExport = filterDateMode === 'month' && filterMonth ? filterMonth : (filterDate ? filterDate.slice(0, 7) : new Date().toISOString().slice(0, 7));
+    apiReq('/attendance/monthly-export-record/', {
+      method: 'POST',
+      body: JSON.stringify({ month: monthForExport, export_type: 'CSV' }),
+    }).then(() => {
+      if (monthForExport === filterMonth) setIsMonthExported(true);
+    }).catch(() => {});
   }
 
   // --------------------------------------------------------------------------
@@ -1621,6 +1703,12 @@ export default function App() {
       if (!row.date.startsWith(filterMonth)) return false;
     }
 
+    // Status filter (all, pending, approved, rejected)
+    if (filterAttStatus && filterAttStatus !== 'all') {
+      const rowStatus = (row.status || 'PENDING').toUpperCase();
+      if (rowStatus !== filterAttStatus.toUpperCase()) return false;
+    }
+
     return true;
   });
 
@@ -1642,8 +1730,6 @@ export default function App() {
 
     return true;
   });
-
-  const monthEndStatus = getMonthEndStatus(filterMonth);
 
   // --------------------------------------------------------------------------
   // RENDER: Authenticated Dashboard
@@ -2792,7 +2878,22 @@ export default function App() {
                   </div>
                 )}
 
-                {(filterDateMode !== 'all' || filterDayOfWeek || filterShop) && (
+                {/* Status Filter */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span className="filter-label">Status:</span>
+                  <select
+                    value={filterAttStatus}
+                    onChange={(e) => setFilterAttStatus(e.target.value)}
+                    style={{ padding: '6px 10px', fontSize: 13 }}
+                  >
+                    <option value="all">All Statuses</option>
+                    <option value="PENDING">Pending</option>
+                    <option value="APPROVED">Accepted</option>
+                    <option value="REJECTED">Rejected</option>
+                  </select>
+                </div>
+
+                {(filterDateMode !== 'all' || filterDayOfWeek || filterShop || filterAttStatus !== 'all') && (
                   <button
                     type="button"
                     className="btn btn-secondary btn-sm"
@@ -2837,6 +2938,8 @@ export default function App() {
                     <th>Check Out</th>
                     <th>Hours Worked</th>
                     <th>Shift Status</th>
+                    <th>Approval</th>
+                    {user.role !== 'EMPLOYEE' && <th>Actions</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -2878,12 +2981,53 @@ export default function App() {
                             <span className="badge badge-neutral">—</span>
                           )}
                         </td>
+                        <td>
+                          {row.status === 'APPROVED' ? (
+                            <span className="badge badge-success">✓ Accepted</span>
+                          ) : row.status === 'REJECTED' ? (
+                            <span className="badge badge-danger">✕ Rejected</span>
+                          ) : (
+                            <span className="badge badge-warning">⏳ Pending</span>
+                          )}
+                        </td>
+                        {user.role !== 'EMPLOYEE' && (
+                          <td>
+                            <div style={{ display: 'flex', gap: 6 }}>
+                              {row.status !== 'APPROVED' && (
+                                <button
+                                  type="button"
+                                  className="btn btn-primary btn-sm"
+                                  style={{ padding: '3px 8px', fontSize: 11 }}
+                                  onClick={() => {
+                                    setAttReviewModal({ attendance: row, action: 'approve' });
+                                    setAttReviewComments('');
+                                  }}
+                                >
+                                  Accept
+                                </button>
+                              )}
+                              {row.status !== 'REJECTED' && (
+                                <button
+                                  type="button"
+                                  className="btn btn-danger btn-sm"
+                                  style={{ padding: '3px 8px', fontSize: 11 }}
+                                  onClick={() => {
+                                    setAttReviewModal({ attendance: row, action: 'reject' });
+                                    setAttReviewComments('');
+                                  }}
+                                >
+                                  Reject
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        )}
                       </tr>
                     );
                   })}
                   {!filteredAttendance.length && (
                     <tr>
-                      <td colSpan="8" style={{ textAlign: 'center', padding: 24, color: 'var(--slate-500)' }}>
+                      <td colSpan={user.role !== 'EMPLOYEE' ? 10 : 9} style={{ textAlign: 'center', padding: 24, color: 'var(--slate-500)' }}>
                         No attendance records found matching filters.
                       </td>
                     </tr>
@@ -2932,6 +3076,46 @@ export default function App() {
                       <span className="mobile-card-label">Hours Worked</span>
                       <span className="mobile-card-val"><strong>{hoursDisplay}</strong></span>
                     </div>
+                    <div className="mobile-card-row">
+                      <span className="mobile-card-label">Approval</span>
+                      <span className="mobile-card-val">
+                        {row.status === 'APPROVED' ? (
+                          <span className="badge badge-success">✓ Accepted</span>
+                        ) : row.status === 'REJECTED' ? (
+                          <span className="badge badge-danger">✕ Rejected</span>
+                        ) : (
+                          <span className="badge badge-warning">⏳ Pending</span>
+                        )}
+                      </span>
+                    </div>
+                    {user.role !== 'EMPLOYEE' && (
+                      <div className="mobile-card-actions" style={{ marginTop: 8, display: 'flex', gap: 6 }}>
+                        {row.status !== 'APPROVED' && (
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-sm"
+                            onClick={() => {
+                              setAttReviewModal({ attendance: row, action: 'approve' });
+                              setAttReviewComments('');
+                            }}
+                          >
+                            Accept
+                          </button>
+                        )}
+                        {row.status !== 'REJECTED' && (
+                          <button
+                            type="button"
+                            className="btn btn-danger btn-sm"
+                            onClick={() => {
+                              setAttReviewModal({ attendance: row, action: 'reject' });
+                              setAttReviewComments('');
+                            }}
+                          >
+                            Reject
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -2952,51 +3136,65 @@ export default function App() {
             <div className="card">
               <div className="card-header">
                 <div>
-                  <h3 className="card-title">Geofence Evidence Verification</h3>
+                  <h3 className="card-title">Geofence Evidence & Month Data Management</h3>
                   <p className="card-subtitle">Selfie camera photos and GPS distance audit trail for {filterMonth}</p>
                 </div>
 
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
                   {user.role !== 'EMPLOYEE' && (
-                    <button
-                      type="button"
-                      className={`btn ${monthEndStatus.isAvailable ? 'btn-primary' : 'btn-secondary'} btn-sm`}
-                      onClick={() => handleExportAuditPackageAndPurge(filterMonth)}
-                      disabled={isPurgingEvidence || !monthEndStatus.isAvailable}
-                      title={!monthEndStatus.isAvailable ? monthEndStatus.reason : 'Export offline HTML audit report with embedded photos and auto-purge photos from database'}
-                    >
-                      {isPurgingEvidence ? (
-                        '⏳ Exporting & Auto-Purging...'
-                      ) : monthEndStatus.isAvailable ? (
-                        '📥 Export Audit Dossier & Auto-Purge'
-                      ) : (
-                        `🔒 Auto-Purge on Month End (${monthEndStatus.lastDayFormatted || 'Month End'})`
-                      )}
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        onClick={() => handleExportAuditPackage(filterMonth)}
+                        disabled={isExportingDossier}
+                        title="Export complete offline HTML audit report with all photos embedded. Can be exported anytime as needed."
+                      >
+                        {isExportingDossier ? '⏳ Exporting Dossier...' : '📥 Export Audit Dossier'}
+                      </button>
+                      <button
+                        type="button"
+                        className={`btn ${isMonthExported ? 'btn-danger' : 'btn-secondary'} btn-sm`}
+                        onClick={() => handleDeleteMonthData(filterMonth)}
+                        disabled={isDeletingMonthData}
+                        title={
+                          isMonthExported
+                            ? `Permanently delete all attendance records and photos for ${filterMonth}`
+                            : `Please export report first before deleting data for ${filterMonth} (Recommendation: Purge data every 6 months)`
+                        }
+                      >
+                        {isDeletingMonthData ? '⏳ Deleting Data...' : `🗑️ Delete Data (${filterMonth})`}
+                      </button>
+                    </>
                   )}
                 </div>
               </div>
 
-              {/* Month-End Policy Alert Banner */}
+              {/* Data Retention & Purge Policy Notification Banner */}
               {user.role !== 'EMPLOYEE' && (
                 <div
-                  className={`alert-banner ${monthEndStatus.isAvailable ? 'warning' : 'info'}`}
+                  className={`alert-banner ${isMonthExported ? 'info' : 'warning'}`}
                   style={{ margin: '0 20px 16px 20px' }}
                 >
                   <div className="alert-banner-content">
-                    <span style={{ fontSize: 18 }}>{monthEndStatus.isAvailable ? '⚡' : '🛡️'}</span>
+                    <span style={{ fontSize: 18 }}>{isMonthExported ? '🛡️' : 'ℹ️'}</span>
                     <div>
                       <strong>
-                        {monthEndStatus.isAvailable
-                          ? `Month-End Audit Window Open for ${filterMonth}`
-                          : `Month-End Auto-Purge Policy (${filterMonth})`}
+                        {isMonthExported
+                          ? `Export Verified for ${filterMonth} — Eligible for Deletion`
+                          : `Data Retention Policy (${filterMonth})`}
                       </strong>
-                      <div style={{ fontSize: 12, marginTop: 2, color: monthEndStatus.isAvailable ? 'inherit' : 'var(--slate-600)' }}>
-                        {monthEndStatus.isAvailable
-                          ? 'You can now export the complete Audit Dossier with all employee verification photos embedded. Database selfie photos will be automatically purged upon download to free storage.'
-                          : `Evidence photos are actively preserved during shift operations. On the final day of the month (${monthEndStatus.lastDayFormatted}), the "Export Audit Dossier & Auto-Purge" button will unlock to let you download the offline audit report and auto-clean the database.`}
+                      <div style={{ fontSize: 12, marginTop: 2, color: 'var(--slate-700)' }}>
+                        {isMonthExported
+                          ? `Report has been exported for this month. You may download it again anytime, or permanently delete the attendance and photo records if needed. (Recommendation: Take report and purge data every 6 months).`
+                          : `You can export reports anytime whenever you need while data is available. Before deleting data for any selected month, the report must be exported at least once. (Recommendation: Take report and purge data every 6 months to maintain optimal performance).`}
                       </div>
                     </div>
+                  </div>
+                  <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span className={`badge ${isMonthExported ? 'badge-success' : 'badge-warning'}`}>
+                      {isMonthExported ? '✓ Exported' : '⚠️ Export Required to Delete'}
+                    </span>
                   </div>
                 </div>
               )}
@@ -3012,6 +3210,7 @@ export default function App() {
                       const m = e.target.value;
                       setFilterMonth(m);
                       if (m) {
+                        checkMonthExportStatus(m, filterShop);
                         apiReq(`/attendance/evidence/?month=${m}${filterShop ? `&shop_id=${filterShop}` : ''}`)
                           .then((ev) => setEvidenceList(ev))
                           .catch(() => {});
@@ -3763,6 +3962,72 @@ export default function App() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ================================================================== */}
+      {/* MODAL: ACCEPT / REJECT ATTENDANCE RECORD                           */}
+      {/* ================================================================== */}
+      {attReviewModal && (
+        <div className="modal-overlay" onClick={() => setAttReviewModal(null)}>
+          <div className="modal-dialog" style={{ width: 480 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div>
+                <h3 style={{ fontSize: 18, fontWeight: 700 }}>
+                  {attReviewModal.action === 'approve' ? 'Accept Attendance Record' : 'Reject Attendance Record'}
+                </h3>
+                <p style={{ fontSize: 13, color: 'var(--slate-500)', marginTop: 2 }}>
+                  Staff: <strong>{attReviewModal.attendance.employee_name || attReviewModal.attendance.employee}</strong> ({attReviewModal.attendance.employee})
+                </p>
+              </div>
+              <button
+                type="button"
+                className="modal-close-btn"
+                onClick={() => setAttReviewModal(null)}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ marginTop: 14 }}>
+              <div style={{ background: 'var(--slate-50)', padding: 12, borderRadius: 6, fontSize: 13, marginBottom: 14, border: '1px solid var(--slate-200)' }}>
+                <div>Branch: <strong>{attReviewModal.attendance.shop} ({attReviewModal.attendance.shop_code})</strong></div>
+                <div>Date: <strong>{attReviewModal.attendance.date} ({attReviewModal.attendance.day_of_week})</strong></div>
+                <div>Check In: <strong>{formatTime(attReviewModal.attendance.check_in)}</strong></div>
+                <div>Check Out: <strong>{formatTime(attReviewModal.attendance.check_out)}</strong></div>
+              </div>
+
+              <div className="form-group">
+                <label>Supervisor Note (Optional)</label>
+                <textarea
+                  rows={3}
+                  placeholder={`Reason for ${attReviewModal.action === 'approve' ? 'accepting' : 'rejecting'} this attendance record...`}
+                  value={attReviewComments}
+                  onChange={(e) => setAttReviewComments(e.target.value)}
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid var(--slate-300)' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setAttReviewModal(null)}
+                  disabled={isSubmittingAttReview}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className={`btn ${attReviewModal.action === 'approve' ? 'btn-primary' : 'btn-danger'}`}
+                  onClick={handleAttendanceReviewAction}
+                  disabled={isSubmittingAttReview}
+                >
+                  {isSubmittingAttReview ? 'Saving...' : `Confirm ${attReviewModal.action === 'approve' ? 'Accept' : 'Reject'}`}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

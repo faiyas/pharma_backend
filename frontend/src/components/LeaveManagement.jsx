@@ -176,18 +176,20 @@ export default function LeaveManagement({ user, shops, addToast, apiReq }) {
             >
               ↻ Refresh
             </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => setShowApplyModal(true)}
-            >
-              + Apply for Leave
-            </button>
+            {isEmployee && (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setShowApplyModal(true)}
+              >
+                + Apply for Leave
+              </button>
+            )}
           </div>
         </div>
 
-        {/* Leave Balance Chips (Especially for employee, or manager view) */}
-        {myBalance && (
+        {/* Leave Balance Chips (Specifically for employee) */}
+        {isEmployee && myBalance && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--slate-200)' }}>
             <div className="quick-chip" style={{ flex: '1 1 140px' }}>
               <span className="chip-label">Casual Leave</span>
@@ -413,9 +415,9 @@ export default function LeaveManagement({ user, shops, addToast, apiReq }) {
       </div>
 
       {/* ================================================================== */}
-      {/* MODAL: APPLY FOR LEAVE                                             */}
+      {/* MODAL: APPLY FOR LEAVE (EMPLOYEE ONLY)                             */}
       {/* ================================================================== */}
-      {showApplyModal && (
+      {isEmployee && showApplyModal && (
         <div className="modal-overlay" onClick={() => setShowApplyModal(false)}>
           <div className="modal-card" style={{ maxWidth: 540 }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">

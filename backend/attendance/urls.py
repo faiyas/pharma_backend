@@ -1,5 +1,15 @@
 from django.urls import path
-from .views import Submit, TodayStatus, Records, Evidence, EvidencePurge
+from .views import (
+    Submit,
+    TodayStatus,
+    Records,
+    Evidence,
+    EvidencePurge,
+    AttendanceApproveView,
+    AttendanceRejectView,
+    MonthlyExportRecordView,
+    MonthlyDataPurgeView,
+)
 from .correction_views import (
     AttendanceCorrectionListCreateView,
     AttendanceCorrectionDetailView,
@@ -23,8 +33,13 @@ urlpatterns = [
     path('attendance/today/', TodayStatus.as_view()),
     path('attendance/submit/', Submit.as_view()),
     path('attendance/', Records.as_view()),
+    path('attendance/<int:pk>/approve/', AttendanceApproveView.as_view()),
+    path('attendance/<int:pk>/accept/', AttendanceApproveView.as_view()),
+    path('attendance/<int:pk>/reject/', AttendanceRejectView.as_view()),
     path('attendance/evidence/', Evidence.as_view()),
-    path('attendance/evidence/purge/', EvidencePurge.as_view()),
+    path('attendance/evidence/purge/', MonthlyDataPurgeView.as_view()),
+    path('attendance/monthly-purge/', MonthlyDataPurgeView.as_view()),
+    path('attendance/monthly-export-record/', MonthlyExportRecordView.as_view()),
 
     # Feature 2: Attendance Corrections & Adjustments
     path('attendance-corrections/', AttendanceCorrectionListCreateView.as_view()),
