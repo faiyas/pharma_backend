@@ -8,20 +8,29 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 
 # openpyxl for Excel
-import openpyxl
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.utils import get_column_letter
+try:
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+    HAS_OPENPYXL = True
+except ImportError:
+    HAS_OPENPYXL = False
 
 # reportlab for PDF
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import letter, landscape, A4
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-from reportlab.pdfgen import canvas
+try:
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import letter, landscape, A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reportlab.pdfgen import canvas
+    HAS_REPORTLAB = True
+except ImportError:
+    HAS_REPORTLAB = False
 
 from shops.models import Shop, Employee, ShopManager, EmployeeTransfer, EmployeeHistory
 from leaves.models import LeaveRequest
 from .models import Attendance, AttendanceCorrection, Event
+
 
 def get_report_shops(user):
     if user.role == "SUPER_ADMIN":
@@ -298,6 +307,8 @@ class ReportExportView(APIView):
             return title, headers, rows
 
     def generate_excel(self, title, headers, rows, filename_base, start_date, end_date, user):
+        if not HAS_OPENPYXL:
+            return Response({"detail": "openpyxl is required for Excel export."}, status=500)
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "PharmaTrack Report"
@@ -376,6 +387,8 @@ class ReportExportView(APIView):
         return response
 
     def generate_pdf(self, title, headers, rows, filename_base, start_date, end_date, user):
+        if not HAS_REPORTLAB:
+            return Response({"detail": "reportlab is required for PDF export."}, status=500)
         buf = io.BytesIO()
         doc = SimpleDocTemplate(
             buf,
