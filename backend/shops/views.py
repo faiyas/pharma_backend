@@ -251,9 +251,10 @@ class EmployeeDetail(APIView):
                 Event.objects.filter(employee=emp).delete()
                 Attendance.objects.filter(employee=emp).delete()
 
-                emp.delete()
                 if user:
                     user.delete()
+                else:
+                    emp.delete()
 
                 AuditLog.log_event(
                     user=r.user,
