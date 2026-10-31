@@ -1,0 +1,23 @@
+name: Render Backend 24/7 Keep-Alive
+
+on:
+  schedule:
+    # Runs every 14 minutes to prevent Render free tier from sleeping (15-minute inactivity timeout)
+    - cron: '*/14 * * * *'
+  workflow_dispatch:
+
+jobs:
+  keep-alive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Backend Health Check
+        run: |
+          RENDER_URL="${{ secrets.RENDER_BACKEND_URL || 'https://pharma-backend.onrender.com' }}"
+          echo "Sending automated keep-alive ping to $RENDER_URL/api/health/..."
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" -m 35 "$RENDER_URL/api/health/" || echo "000")
+          echo "Response HTTP Status: $STATUS"
+          if [ "$STATUS" = "200" ]; then
+            echo "Backend is hot and responsive!"
+          else
+            echo "Server may be spinning up or URL pending configuration."
+          fi

@@ -35,9 +35,13 @@ def db_check(request):
 
 urlpatterns=[
     path("health/", health_check),
+    path("health", health_check),
     path("api/health/", health_check),
+    path("api/health", health_check),
     path("db-check/", db_check),
+    path("db-check", db_check),
     path("api/db-check/", db_check),
+    path("api/db-check", db_check),
     path("admin/",admin.site.urls),
     path("api/auth/token/",CustomTokenObtainPairView.as_view()),
     path("api/auth/token/refresh/",TokenRefreshView.as_view()),

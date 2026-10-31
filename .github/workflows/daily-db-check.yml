@@ -24,10 +24,15 @@ jobs:
         run: |
           pip install django dj-database-url psycopg2-binary djangorestframework django-cors-headers djangorestframework-simplejwt whitenoise
 
-      - name: Run Database Check Ping
+      - name: Run Silent Database Health Query
         working-directory: backend
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://postgres:Faroz%409565%23123@db.jhwzdsgqstlowvuxpzyf.supabase.co:5432/postgres?sslmode=require' }}
           SECRET_KEY: 'ci-secret-key-check'
         run: |
           python manage.py db_check
+
+      - name: Ping Live API Database Check (Optional)
+        run: |
+          RENDER_URL="${{ secrets.RENDER_BACKEND_URL || 'https://pharma-backend.onrender.com' }}"
+          curl -s -m 30 "$RENDER_URL/api/db-check/" || echo "Direct ping completed"
