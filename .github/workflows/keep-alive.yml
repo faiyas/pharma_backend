@@ -12,7 +12,7 @@ jobs:
     steps:
       - name: Ping Backend Health Check
         run: |
-          RENDER_URL="${{ secrets.RENDER_BACKEND_URL || 'https://pharma-backend.onrender.com' }}"
+          RENDER_URL="${{ secrets.RENDER_BACKEND_URL || 'https://pharma-backend-drjq.onrender.com' }}"
           echo "Sending automated keep-alive ping to $RENDER_URL/api/health/..."
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" -m 35 "$RENDER_URL/api/health/" || echo "000")
           echo "Response HTTP Status: $STATUS"
