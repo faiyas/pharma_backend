@@ -33,6 +33,9 @@ print("=" * 60)
 endpoints = [
     f"{SERVER_URL}/api/health/",
     f"{SERVER_URL}/api/db-check/",
+    # Maintain Render + Supabase backend active 24/7 so it never sleeps or idles
+    "https://pharma-backend-drjq.onrender.com/api/health/",
+    "https://pharma-backend-drjq.onrender.com/api/db-check/",
 ]
 
 def ping(url):

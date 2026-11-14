@@ -8,8 +8,22 @@ import GPSGeofenceMap from './components/GPSGeofenceMap';
 import AttendanceAnalytics from './components/AttendanceAnalytics';
 import ReportExports from './components/ReportExports';
 
-const RAW_API_BASE = import.meta.env.VITE_API_BASE || '';
-const API_BASE = RAW_API_BASE ? `${RAW_API_BASE.replace(/\/$/, '')}/api` : '/api';
+// ==============================================================================
+// BACKEND CONFIGURATION
+// App uses the Instabox Linux PostgreSQL backend.
+// Render is commented out for app requests, but pinged via keep-alive heartbeats
+// so Render + Supabase database remain active 24/7.
+// ==============================================================================
+const INSTABOX_BACKEND = 'https://8000-agq5qlr2uletnjyzudtddvxrdq.instabox.tech';
+// const RENDER_BACKEND = 'https://pharma-backend-drjq.onrender.com'; // Render backend (commented out for app usage)
+
+// Active backend URL used for all app user actions, auth, and database records
+const RAW_API_BASE = INSTABOX_BACKEND;
+const API_BASE = `${RAW_API_BASE.replace(/\/$/, '')}/api`;
+
+// Standing keep-alive endpoints for Render & Supabase
+const RENDER_HEALTH_URL = 'https://pharma-backend-drjq.onrender.com/api/health/';
+const RENDER_DB_URL = 'https://pharma-backend-drjq.onrender.com/api/db-check/';
 
 // Log Active Backend URL in DevTools Console
 console.log(
@@ -17,6 +31,13 @@ console.log(
   'background: #0f766e; color: white; padding: 3px 8px; border-radius: 4px; font-weight: bold; font-size: 12px;',
   'color: #0f766e; font-weight: bold; font-size: 12px;',
   'color: #0284c7; font-weight: bold; text-decoration: underline; font-size: 12px;'
+);
+console.log(
+  `%c[PharmaTrack Heartbeat] %cRender + Supabase maintained active in background via 60s pings (%chttps://pharma-backend-drjq.onrender.com%c)`,
+  'background: #334155; color: white; padding: 2px 6px; border-radius: 3px; font-size: 11px;',
+  'color: #64748b; font-size: 11px;',
+  'color: #0284c7; font-weight: 500;',
+  'color: #64748b;'
 );
 
 // Haversine distance calculator in metres
@@ -501,11 +522,12 @@ export default function App() {
   // Keep-alive heartbeat: ping backend every 60 seconds & on tab focus to keep backend alive
   useEffect(() => {
     const keepAlive = () => {
+      // 1. Primary Instabox Linux PostgreSQL backend heartbeat
       fetch(`${API_BASE}/health/`, { method: 'GET', keepalive: true })
         .then((r) => r.json())
         .then((d) => {
           console.log(
-            `%c[HEARTBEAT 200] %cBackend active & healthy %c(${new Date().toLocaleTimeString()})`,
+            `%c[HEARTBEAT 200] %cInstabox active & healthy %c(${new Date().toLocaleTimeString()})`,
             'background: #0f766e; color: white; padding: 2px 5px; border-radius: 3px; font-weight: bold; font-size: 10px;',
             'color: #0f766e; font-weight: 600; font-size: 11px;',
             'color: #94a3b8; font-size: 10px;',
@@ -514,11 +536,38 @@ export default function App() {
         })
         .catch((err) => {
           console.warn(
-            `%c[HEARTBEAT WARNING] %cBackend ping failed: ${err.message}`,
+            `%c[HEARTBEAT WARNING] %cInstabox backend ping failed: ${err.message}`,
             'background: #eab308; color: black; padding: 2px 5px; border-radius: 3px; font-weight: bold; font-size: 10px;',
             'color: #ca8a04; font-size: 11px;'
           );
         });
+
+      // 2. Continuous keep-alive pings to Render + Supabase so they never sleep or idle out
+      fetch(RENDER_HEALTH_URL, { method: 'GET', keepalive: true })
+        .then((r) => r.json())
+        .then((d) => {
+          console.log(
+            `%c[RENDER PING 200] %cRender alive %c(${new Date().toLocaleTimeString()})`,
+            'background: #3b82f6; color: white; padding: 2px 5px; border-radius: 3px; font-weight: bold; font-size: 10px;',
+            'color: #3b82f6; font-size: 11px;',
+            'color: #94a3b8; font-size: 10px;',
+            d
+          );
+        })
+        .catch(() => {});
+
+      fetch(RENDER_DB_URL, { method: 'GET', keepalive: true })
+        .then((r) => r.json())
+        .then((d) => {
+          console.log(
+            `%c[SUPABASE PING 200] %cSupabase DB connected %c(${new Date().toLocaleTimeString()})`,
+            'background: #10b981; color: white; padding: 2px 5px; border-radius: 3px; font-weight: bold; font-size: 10px;',
+            'color: #10b981; font-size: 11px;',
+            'color: #94a3b8; font-size: 10px;',
+            d
+          );
+        })
+        .catch(() => {});
     };
     keepAlive();
     const interval = setInterval(keepAlive, 60000);

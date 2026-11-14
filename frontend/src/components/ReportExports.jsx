@@ -25,8 +25,11 @@ export default function ReportExports({ user, shops, addToast, apiReq }) {
   const handleDownload = async () => {
     setIsExporting(true);
     try {
-      const RAW_API_BASE = import.meta.env.VITE_API_BASE || '';
-      const API_BASE = RAW_API_BASE ? `${RAW_API_BASE.replace(/\/$/, '')}/api` : '/api';
+      // Instabox backend for reports (Render commented out)
+      const INSTABOX_BACKEND = 'https://8000-agq5qlr2uletnjyzudtddvxrdq.instabox.tech';
+      // const RENDER_BACKEND = 'https://pharma-backend-drjq.onrender.com';
+      const RAW_API_BASE = INSTABOX_BACKEND;
+      const API_BASE = `${RAW_API_BASE.replace(/\/$/, '')}/api`;
 
       const token = localStorage.getItem('access');
       const params = new URLSearchParams({
