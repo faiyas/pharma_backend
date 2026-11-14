@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import '../config/api_constants.dart';
 import '../models/attendance_model.dart';
+import '../models/correction_model.dart';
+import '../models/evidence_model.dart';
 import '../models/shop_model.dart';
 import '../services/api_service.dart';
 import '../services/camera_service.dart';
@@ -11,6 +13,8 @@ import '../services/location_service.dart';
 class AttendanceProvider extends ChangeNotifier {
   TodayStatusModel? _todayStatus;
   List<AttendanceRecordModel> _history = [];
+  List<CorrectionModel> _myCorrections = [];
+  List<EvidenceModel> _myEvidence = [];
   bool _isLoading = false;
   bool _isPunching = false;
   String? _errorMessage;
@@ -28,6 +32,8 @@ class AttendanceProvider extends ChangeNotifier {
 
   TodayStatusModel? get todayStatus => _todayStatus;
   List<AttendanceRecordModel> get history => _history;
+  List<CorrectionModel> get myCorrections => _myCorrections;
+  List<EvidenceModel> get myEvidence => _myEvidence;
   bool get isLoading => _isLoading;
   bool get isPunching => _isPunching;
   String? get errorMessage => _errorMessage;
@@ -176,6 +182,70 @@ class AttendanceProvider extends ChangeNotifier {
       if (res.success && res.data is List) {
         _history = (res.data as List)
             .map((item) => AttendanceRecordModel.fromJson(item as Map<String, dynamic>))
+            .toList();
+        notifyListeners();
+      }
+    } catch (_) {}
+  }
+
+  Future<void> fetchMyCorrections() async {
+    try {
+      final res = await ApiService.get(ApiConstants.corrections);
+      if (res.success && res.data is List) {
+        _myCorrections = (res.data as List)
+            .map((c) => CorrectionModel.fromJson(c as Map<String, dynamic>))
+            .toList();
+        notifyListeners();
+      }
+    } catch (_) {}
+  }
+
+  Future<bool> requestCorrection({
+    required String attendanceDate,
+    required String eventType,
+    required String requestedTimestamp,
+    required String reason,
+  }) async {
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      final res = await ApiService.post(
+        ApiConstants.corrections,
+        body: {
+          'attendance_date': attendanceDate,
+          'event_type': eventType,
+          'requested_timestamp': requestedTimestamp,
+          'reason': reason,
+        },
+      );
+
+      if (res.success) {
+        await fetchMyCorrections();
+        _isLoading = false;
+        notifyListeners();
+        return true;
+      } else {
+        _errorMessage = res.errorMessage ?? 'Failed to submit correction request.';
+        _isLoading = false;
+        notifyListeners();
+        return false;
+      }
+    } catch (e) {
+      _errorMessage = 'Error submitting correction: $e';
+      _isLoading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<void> fetchMyEvidence() async {
+    try {
+      final res = await ApiService.get(ApiConstants.evidence);
+      if (res.success && res.data is List) {
+        _myEvidence = (res.data as List)
+            .map((e) => EvidenceModel.fromJson(e as Map<String, dynamic>))
             .toList();
         notifyListeners();
       }

@@ -23,6 +23,7 @@ class ApiConstants {
   static String get attendanceRecords => '$baseUrl/attendance/';
   static String attendanceApprove(int id) => '$baseUrl/attendance/$id/approve/';
   static String attendanceReject(int id) => '$baseUrl/attendance/$id/reject/';
+  static String get evidence => '$baseUrl/attendance/evidence/';
 
   // Leaves endpoints
   static String get leaves => '$baseUrl/leaves/';
@@ -40,6 +41,13 @@ class ApiConstants {
   static String get monitoringBranches => '$baseUrl/monitoring/branches/';
   static String get monitoringLiveActivity => '$baseUrl/monitoring/activity/';
   static String get shops => '$baseUrl/shops/';
+  static String shopDetail(int id) => '$baseUrl/shops/$id/';
+  static String shopManagers(int shopId) => '$baseUrl/shops/$shopId/managers/';
+  static String shopEmployees(int shopId) => '$baseUrl/shops/$shopId/employees/';
+
+  // Manager accounts (SuperAdmin)
+  static String get managers => '$baseUrl/managers/';
+  static String managerDetail(int id) => '$baseUrl/managers/$id/';
 
   // Employee Lifecycle endpoints
   static String get employees => '$baseUrl/employees/';
@@ -47,6 +55,10 @@ class ApiConstants {
   static String employeeDeactivate(int id) => '$baseUrl/employees/$id/deactivate/';
   static String employeeTransfer(int id) => '$baseUrl/employees/$id/transfer/';
   static String employeeHistory(int id) => '$baseUrl/employees/$id/history/';
+  static String employeeResetPassword(int id) => '$baseUrl/employees/$id/reset-password/';
+
+  // Audit Logs (SuperAdmin)
+  static String get auditLog => '$baseUrl/auditlog/';
 
   // Analytics endpoints
   static String get analyticsOverview => '$baseUrl/analytics/overview/';

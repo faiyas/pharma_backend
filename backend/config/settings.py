@@ -66,12 +66,17 @@ WSGI_APPLICATION = "config.wsgi.application"
 # Supabase PostgreSQL / Local SQLite fallback
 DATABASE_URL = os.environ.get("DATABASE_URL")
 if DATABASE_URL:
+    use_ssl = (
+        os.environ.get("DB_SSL_REQUIRE", "").lower() in ("true", "1")
+        or "sslmode=require" in DATABASE_URL
+        or "supabase" in DATABASE_URL
+    )
     DATABASES = {
         "default": dj_database_url.config(
             default=DATABASE_URL,
             conn_max_age=600,
             conn_health_checks=True,
-            ssl_require=True,
+            ssl_require=use_ssl,
         )
     }
 else:

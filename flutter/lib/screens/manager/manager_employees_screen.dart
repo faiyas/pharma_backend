@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../config/theme.dart';
 import '../../models/employee_model.dart';
 import '../../providers/manager_provider.dart';
+import 'manager_branches_screen.dart';
 
 class ManagerEmployeesScreen extends StatefulWidget {
   const ManagerEmployeesScreen({super.key});
@@ -276,6 +277,14 @@ class _ManagerEmployeesScreenState extends State<ManagerEmployeesScreen> {
             onPressed: () => _filter(),
           ),
         ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        icon: const Icon(Icons.group_add),
+        label: const Text('Onboard Staff'),
+        onPressed: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const ManagerBranchesScreen()),
+        ),
       ),
       body: Column(
         children: [

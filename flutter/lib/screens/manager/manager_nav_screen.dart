@@ -9,10 +9,12 @@ import 'manager_account_screen.dart';
 import 'manager_analytics_screen.dart';
 import 'manager_approvals_screen.dart';
 import 'manager_attendance_screen.dart';
+import 'manager_audit_screen.dart';
 import 'manager_branches_screen.dart';
 import 'manager_dashboard_screen.dart';
 import 'manager_employees_screen.dart';
 import 'manager_monitoring_screen.dart';
+import 'manager_supervisors_screen.dart';
 
 class ManagerNavScreen extends StatefulWidget {
   const ManagerNavScreen({super.key});
@@ -171,6 +173,25 @@ class _ManagerNavScreenState extends State<ManagerNavScreen> {
                 Navigator.push(context, MaterialPageRoute(builder: (_) => const ManagerAnalyticsScreen()));
               },
             ),
+            if (user?.role == 'SUPER_ADMIN') ...[
+              const Divider(),
+              ListTile(
+                leading: const Icon(Icons.shield_outlined, color: Colors.indigo),
+                title: const Text('Supervisors & Managers'),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const ManagerSupervisorsScreen()));
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.history_edu, color: Colors.blueGrey),
+                title: const Text('Security & Audit Logs'),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const ManagerAuditScreen()));
+                },
+              ),
+            ],
             const Divider(),
             ListTile(
               leading: const Icon(Icons.manage_accounts_outlined, color: AppTheme.textMuted),

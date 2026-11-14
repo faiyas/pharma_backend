@@ -2,8 +2,11 @@ import 'package:flutter/material.dart';
 import '../config/api_constants.dart';
 import '../models/analytics_model.dart';
 import '../models/attendance_model.dart';
+import '../models/audit_log_model.dart';
 import '../models/correction_model.dart';
 import '../models/employee_model.dart';
+import '../models/evidence_model.dart';
+import '../models/manager_model.dart';
 import '../models/shop_model.dart';
 import '../services/api_service.dart';
 
@@ -68,6 +71,9 @@ class ManagerProvider extends ChangeNotifier {
   List<AttendanceRecordModel> _pendingAttendanceReviews = [];
   List<CorrectionModel> _corrections = [];
   List<CorrectionModel> _pendingCorrections = [];
+  List<ManagerAccountModel> _managers = [];
+  List<AuditLogModel> _auditLogs = [];
+  List<EvidenceModel> _evidenceList = [];
   List<dynamic> _liveActivity = [];
   AnalyticsModel? _analytics;
 
@@ -81,6 +87,9 @@ class ManagerProvider extends ChangeNotifier {
   List<AttendanceRecordModel> get pendingAttendanceReviews => _pendingAttendanceReviews;
   List<CorrectionModel> get corrections => _corrections;
   List<CorrectionModel> get pendingCorrections => _pendingCorrections;
+  List<ManagerAccountModel> get managers => _managers;
+  List<AuditLogModel> get auditLogs => _auditLogs;
+  List<EvidenceModel> get evidenceList => _evidenceList;
   List<dynamic> get liveActivity => _liveActivity;
   AnalyticsModel? get analytics => _analytics;
 
@@ -324,5 +333,222 @@ class ManagerProvider extends ChangeNotifier {
       body: {'old_password': oldPassword, 'new_password': newPassword},
     );
     return res.success;
+  }
+
+  // Branch / Store Creation & Management
+  Future<bool> createBranch({
+    required String name,
+    required String address,
+    required double latitude,
+    required double longitude,
+    required int allowedRadiusM,
+    double locationAccuracyM = 0.0,
+  }) async {
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      final res = await ApiService.post(
+        ApiConstants.shops,
+        body: {
+          'name': name.trim(),
+          'address': address.trim(),
+          'latitude': latitude,
+          'longitude': longitude,
+          'allowed_radius_m': allowedRadiusM,
+          'location_accuracy_m': locationAccuracyM,
+        },
+      );
+
+      if (res.success) {
+        await fetchBranches();
+        await fetchSummary();
+        _isLoading = false;
+        notifyListeners();
+        return true;
+      } else {
+        _errorMessage = res.errorMessage ?? 'Failed to create branch.';
+        _isLoading = false;
+        notifyListeners();
+        return false;
+      }
+    } catch (e) {
+      _errorMessage = 'Error creating branch: $e';
+      _isLoading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> updateBranch(
+    int shopId, {
+    String? name,
+    String? address,
+    int? allowedRadiusM,
+    double? latitude,
+    double? longitude,
+  }) async {
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      final body = <String, dynamic>{};
+      if (name != null) body['name'] = name;
+      if (address != null) body['address'] = address;
+      if (allowedRadiusM != null) body['allowed_radius_m'] = allowedRadiusM;
+      if (latitude != null) body['latitude'] = latitude;
+      if (longitude != null) body['longitude'] = longitude;
+
+      final res = await ApiService.patch(ApiConstants.shopDetail(shopId), body: body);
+      if (res.success) {
+        await fetchBranches();
+        _isLoading = false;
+        notifyListeners();
+        return true;
+      }
+    } catch (_) {}
+    _isLoading = false;
+    notifyListeners();
+    return false;
+  }
+
+  // SuperAdmin Manager Management
+  Future<void> fetchManagers() async {
+    try {
+      final res = await ApiService.get(ApiConstants.managers);
+      if (res.success && res.data is List) {
+        _managers = (res.data as List)
+            .map((m) => ManagerAccountModel.fromJson(m as Map<String, dynamic>))
+            .toList();
+        notifyListeners();
+      }
+    } catch (_) {}
+  }
+
+  Future<bool> createManager(String username, String password) async {
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      final res = await ApiService.post(
+        ApiConstants.managers,
+        body: {'username': username.trim(), 'password': password},
+      );
+
+      if (res.success) {
+        await fetchManagers();
+        _isLoading = false;
+        notifyListeners();
+        return true;
+      } else {
+        _errorMessage = res.errorMessage ?? 'Failed to create manager account.';
+        _isLoading = false;
+        notifyListeners();
+        return false;
+      }
+    } catch (e) {
+      _errorMessage = 'Error: $e';
+      _isLoading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> assignManagerToShop(int shopId, int managerId, {bool remove = false}) async {
+    try {
+      final res = await ApiService.post(
+        ApiConstants.shopManagers(shopId),
+        body: {
+          'manager_id': managerId,
+          'action': remove ? 'remove' : 'assign',
+        },
+      );
+      if (res.success) {
+        await fetchManagers();
+        await fetchBranches();
+        return true;
+      } else {
+        _errorMessage = res.errorMessage;
+        notifyListeners();
+      }
+    } catch (e) {
+      _errorMessage = '$e';
+      notifyListeners();
+    }
+    return false;
+  }
+
+  // Batch Employee Generation
+  Future<List<Map<String, String>>> generateEmployees(int shopId, int count) async {
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      final res = await ApiService.post(
+        ApiConstants.shopEmployees(shopId),
+        body: {'count': count},
+      );
+
+      if (res.success && res.data is Map && res.data['created'] is List) {
+        final list = (res.data['created'] as List)
+            .map((item) => {
+                  'username': item['username']?.toString() ?? '',
+                  'temporary_password': item['temporary_password']?.toString() ?? '1234',
+                })
+            .toList();
+
+        await fetchEmployees();
+        await fetchSummary();
+        _isLoading = false;
+        notifyListeners();
+        return list;
+      } else {
+        _errorMessage = res.errorMessage ?? 'Failed to generate staff accounts.';
+      }
+    } catch (e) {
+      _errorMessage = 'Error generating employees: $e';
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+    return [];
+  }
+
+  // Audit Logs (SuperAdmin)
+  Future<void> fetchAuditLogs() async {
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      final res = await ApiService.get(ApiConstants.auditLog);
+      if (res.success && res.data is List) {
+        _auditLogs = (res.data as List)
+            .map((item) => AuditLogModel.fromJson(item as Map<String, dynamic>))
+            .toList();
+      }
+    } catch (_) {}
+    finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  // Photo Evidence
+  Future<void> fetchEvidence({int? shopId}) async {
+    try {
+      final url = shopId != null
+          ? '${ApiConstants.evidence}?shop_id=$shopId'
+          : ApiConstants.evidence;
+      final res = await ApiService.get(url);
+      if (res.success && res.data is List) {
+        _evidenceList = (res.data as List)
+            .map((e) => EvidenceModel.fromJson(e as Map<String, dynamic>))
+            .toList();
+        notifyListeners();
+      }
+    } catch (_) {}
   }
 }

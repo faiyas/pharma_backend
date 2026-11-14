@@ -152,5 +152,46 @@ class ApiService {
       );
     }
   }
+
+  static Future<ApiResponse> patch(String url, {Map<String, dynamic>? body, bool retryOn401 = true}) async {
+    try {
+      final headers = await _getHeaders();
+      final res = await http.patch(
+        Uri.parse(url),
+        headers: headers,
+        body: body != null ? jsonEncode(body) : null,
+      );
+
+      if (res.statusCode == 401 && retryOn401) {
+        final refreshed = await _tryRefreshToken();
+        if (refreshed) {
+          return patch(url, body: body, retryOn401: false);
+        }
+      }
+
+      dynamic data;
+      try {
+        data = jsonDecode(res.body);
+      } catch (_) {
+        data = res.body;
+      }
+
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        return ApiResponse(success: true, statusCode: res.statusCode, data: data);
+      } else {
+        return ApiResponse(
+          success: false,
+          statusCode: res.statusCode,
+          errorMessage: _extractError(data, res.statusCode),
+        );
+      }
+    } catch (e) {
+      return ApiResponse(
+        success: false,
+        statusCode: 0,
+        errorMessage: 'Network connection failed: $e',
+      );
+    }
+  }
 }
 

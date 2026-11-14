@@ -8,6 +8,7 @@ class UserModel {
   final String? fullName;
   final String? employeeCode;
   final ShopModel? assignedShop;
+  final bool mustChangePassword;
 
   UserModel({
     required this.id,
@@ -17,6 +18,7 @@ class UserModel {
     this.fullName,
     this.employeeCode,
     this.assignedShop,
+    this.mustChangePassword = false,
   });
 
   bool get isEmployee => role == 'EMPLOYEE';
@@ -48,6 +50,7 @@ class UserModel {
       fullName: name?.isNotEmpty == true ? name : json['username']?.toString(),
       employeeCode: empCode,
       assignedShop: shop,
+      mustChangePassword: json['must_change_password'] == true,
     );
   }
 
@@ -59,6 +62,7 @@ class UserModel {
     'full_name': fullName,
     'employee_code': employeeCode,
     'shop': assignedShop?.toJson(),
+    'must_change_password': mustChangePassword,
   };
 }
 

@@ -107,6 +107,50 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<bool> changePassword({
+    required String oldPassword,
+    required String newPassword,
+    String? fullName,
+    String? email,
+    String? dateOfBirth,
+  }) async {
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      final payload = <String, dynamic>{
+        'old_password': oldPassword,
+        'new_password': newPassword,
+      };
+      if (fullName != null && fullName.isNotEmpty) payload['full_name'] = fullName;
+      if (email != null && email.isNotEmpty) payload['email'] = email;
+      if (dateOfBirth != null && dateOfBirth.isNotEmpty) payload['date_of_birth'] = dateOfBirth;
+
+      final res = await ApiService.post(ApiConstants.changePassword, body: payload);
+      if (res.success) {
+        final profileRes = await ApiService.get(ApiConstants.me);
+        if (profileRes.success && profileRes.data is Map<String, dynamic>) {
+          _currentUser = UserModel.fromJson(profileRes.data);
+          await StorageService.saveUser(_currentUser!);
+        }
+        _isLoading = false;
+        notifyListeners();
+        return true;
+      } else {
+        _errorMessage = res.errorMessage ?? 'Password change failed.';
+        _isLoading = false;
+        notifyListeners();
+        return false;
+      }
+    } catch (e) {
+      _errorMessage = 'Error: $e';
+      _isLoading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
   Future<void> logout() async {
     await StorageService.clearAll();
     _currentUser = null;

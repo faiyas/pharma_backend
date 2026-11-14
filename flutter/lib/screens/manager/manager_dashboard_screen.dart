@@ -7,9 +7,11 @@ import '../../providers/manager_provider.dart';
 import 'manager_analytics_screen.dart';
 import 'manager_approvals_screen.dart';
 import 'manager_attendance_screen.dart';
+import 'manager_audit_screen.dart';
 import 'manager_branches_screen.dart';
 import 'manager_employees_screen.dart';
 import 'manager_monitoring_screen.dart';
+import 'manager_supervisors_screen.dart';
 
 class ManagerDashboardScreen extends StatefulWidget {
   const ManagerDashboardScreen({super.key});
@@ -223,6 +225,59 @@ class _ManagerDashboardScreenState extends State<ManagerDashboardScreen> {
                     ),
                     const SizedBox(height: 16),
 
+                    // Quick Actions Hub
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            icon: const Icon(Icons.add_business, size: 16),
+                            label: const Text('New Branch'),
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              foregroundColor: AppTheme.primary,
+                            ),
+                            onPressed: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(builder: (_) => const ManagerBranchesScreen()),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            icon: const Icon(Icons.group_add, size: 16),
+                            label: const Text('Add Staff'),
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              foregroundColor: AppTheme.accent,
+                            ),
+                            onPressed: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(builder: (_) => const ManagerBranchesScreen()),
+                            ),
+                          ),
+                        ),
+                        if (user?.role == 'SUPER_ADMIN') ...[
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              icon: const Icon(Icons.person_add_alt_1, size: 16),
+                              label: const Text('Add Manager'),
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(vertical: 10),
+                                foregroundColor: Colors.deepPurple,
+                              ),
+                              onPressed: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (_) => const ManagerSupervisorsScreen()),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+
                     // KPI Metrics Grid
                     const Text(
                       'Workforce Overview',
@@ -352,6 +407,28 @@ class _ManagerDashboardScreenState extends State<ManagerDashboardScreen> {
                             MaterialPageRoute(builder: (_) => const ManagerAnalyticsScreen()),
                           ),
                         ),
+                        if (user?.role == 'SUPER_ADMIN') ...[
+                          _buildHubTile(
+                            title: 'Supervisors',
+                            subtitle: 'Managers & branch assignments',
+                            icon: Icons.shield_outlined,
+                            color: Colors.indigo,
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(builder: (_) => const ManagerSupervisorsScreen()),
+                            ),
+                          ),
+                          _buildHubTile(
+                            title: 'Security Audit',
+                            subtitle: 'Audit logs & trace history',
+                            icon: Icons.history_edu,
+                            color: Colors.blueGrey,
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(builder: (_) => const ManagerAuditScreen()),
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                     const SizedBox(height: 24),
