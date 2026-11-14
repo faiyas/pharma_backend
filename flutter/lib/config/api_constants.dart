@@ -1,7 +1,7 @@
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 class ApiConstants {
-  static const String liveBackendUrl = 'https://pharma-backend-drjq.onrender.com/api';
+  static const String liveBackendUrl = 'https://8000-agq5qlr2uletnjyzudtddvxrdq.instabox.tech/api';
 
   static String get baseUrl {
     final envUrl = dotenv.env['API_BASE_URL'];
