@@ -104,22 +104,25 @@ STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# CORS & CSRF for Vercel Frontend & Render Backend
+# CORS & CSRF
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
 
+base_trusted = [
+    "https://*.instabox.tech",
+    "https://*.instabox.sh",
+    "https://*.onrender.com",
+    "https://*.vercel.app",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+]
 csrf_env = os.environ.get("CSRF_TRUSTED_ORIGINS")
 if csrf_env:
-    CSRF_TRUSTED_ORIGINS = [c.strip() for c in csrf_env.split(",") if c.strip()]
+    CSRF_TRUSTED_ORIGINS = list(set(base_trusted + [c.strip() for c in csrf_env.split(",") if c.strip()]))
 else:
-    CSRF_TRUSTED_ORIGINS = [
-        "https://*.onrender.com",
-        "https://*.vercel.app",
-        "https://*.instabox.tech",
-        "https://*.instabox.sh",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ]
+    CSRF_TRUSTED_ORIGINS = base_trusted
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
@@ -140,6 +143,7 @@ SIMPLE_JWT = {
 }
 
 # Production Reverse-Proxy & HTTPS Security Settings
+USE_X_FORWARDED_HOST = True
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = "DENY"
