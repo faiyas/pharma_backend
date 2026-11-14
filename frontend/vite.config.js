@@ -9,8 +9,9 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:8000',
+        target: process.env.VITE_API_BASE || 'https://8000-agq5qlr2uletnjyzudtddvxrdq.instabox.tech',
         changeOrigin: true,
+        secure: false,
       },
     },
   },
