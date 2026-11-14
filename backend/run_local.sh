@@ -41,3 +41,4 @@ echo " Backend running at http://0.0.0.0:$PORT"
 echo " Press Ctrl+C to stop"
 echo "=========================================="
 exec python manage.py runserver 0.0.0.0:$PORT
+

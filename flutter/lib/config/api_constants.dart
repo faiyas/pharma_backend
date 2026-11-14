@@ -11,6 +11,10 @@ class ApiConstants {
     return liveBackendUrl;
   }
 
+  // Health & Keep-Alive endpoints
+  static String get health => '$baseUrl/health/';
+  static String get dbCheck => '$baseUrl/db-check/';
+
   // Auth endpoints
   static String get token => '$baseUrl/auth/token/';
   static String get tokenRefresh => '$baseUrl/auth/token/refresh/';

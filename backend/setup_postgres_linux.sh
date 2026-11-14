@@ -78,6 +78,13 @@ python manage.py migrate
 echo "==> Creating default Super Admin account..."
 python manage.py initadmin || true
 
+# Start 1-minute Keep-Alive background worker
+if [ -f "keep_alive.py" ]; then
+    echo "==> Starting 1-minute keep-alive daemon in background..."
+    chmod +x keep_alive.py
+    nohup python3 keep_alive.py > keep_alive.log 2>&1 &
+fi
+
 echo "=========================================================="
 echo " SUCCESS! Database and Backend are fully configured!"
 echo "----------------------------------------------------------"
@@ -86,6 +93,8 @@ echo " API Server URL  : http://0.0.0.0:8000/api/"
 echo " Admin Panel     : http://0.0.0.0:8000/admin/"
 echo " SuperAdmin User : faiyas"
 echo " SuperAdmin Pass : Admin@1234"
+echo " Keep-Alive Log  : tail -f keep_alive.log"
 echo "=========================================================="
 echo " Starting Django Server on 0.0.0.0:8000 (Ctrl+C to stop)..."
 exec python manage.py runserver 0.0.0.0:8000
+

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../config/api_constants.dart';
@@ -191,6 +192,31 @@ class ApiService {
         statusCode: 0,
         errorMessage: 'Network connection failed: $e',
       );
+    }
+  }
+
+  // Keep-Alive Heartbeat (every 1 minute)
+  static Timer? _heartbeatTimer;
+
+  static void startHeartbeat({int intervalSeconds = 60}) {
+    _heartbeatTimer?.cancel();
+    pingHealth();
+    _heartbeatTimer = Timer.periodic(Duration(seconds: intervalSeconds), (_) {
+      pingHealth();
+    });
+  }
+
+  static void stopHeartbeat() {
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = null;
+  }
+
+  static Future<bool> pingHealth() async {
+    try {
+      final res = await http.get(Uri.parse(ApiConstants.health)).timeout(const Duration(seconds: 10));
+      return res.statusCode == 200;
+    } catch (_) {
+      return false;
     }
   }
 }

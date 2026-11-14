@@ -9,6 +9,7 @@ import 'providers/manager_provider.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/employee/employee_nav_screen.dart';
 import 'screens/manager/manager_nav_screen.dart';
+import 'services/api_service.dart';
 import 'services/storage_service.dart';
 
 Future<void> main() async {
@@ -23,6 +24,9 @@ Future<void> main() async {
 
   // Initialize storage service
   await StorageService.init();
+
+  // Start keep-alive heartbeat (pings backend every 1 minute)
+  ApiService.startHeartbeat(intervalSeconds: 60);
 
   runApp(const PharmaTrackApp());
 }

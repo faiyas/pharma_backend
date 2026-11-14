@@ -435,14 +435,25 @@ export default function App() {
     }, 4500);
   }
 
-  // Keep-alive heartbeat: ping backend every 30 seconds to prevent Render free tier spin-down
+  // Keep-alive heartbeat: ping backend every 60 seconds & on tab focus to keep backend alive
   useEffect(() => {
     const keepAlive = () => {
       fetch(`${API_BASE}/health/`, { method: 'GET', keepalive: true }).catch(() => {});
     };
     keepAlive();
-    const interval = setInterval(keepAlive, 30000);
-    return () => clearInterval(interval);
+    const interval = setInterval(keepAlive, 60000);
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        keepAlive();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
   }, []);
 
   // Initial load
