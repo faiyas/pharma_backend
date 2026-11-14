@@ -5,15 +5,25 @@ import dj_database_url
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Automatically load local .env file if present
+env_file = BASE_DIR / ".env"
+if env_file.exists():
+    with open(env_file, "r") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, val = line.split("=", 1)
+                os.environ.setdefault(key.strip(), val.strip().strip("'\""))
+
 SECRET_KEY = os.environ.get("SECRET_KEY", "django-insecure-pharmacy-attendance-dev-key")
-DEBUG = os.environ.get("DEBUG", "False").lower() in ("true", "1", "yes")
+DEBUG = os.environ.get("DEBUG", "True").lower() in ("true", "1", "yes")
 
 # Allowed Hosts
 hosts_env = os.environ.get("ALLOWED_HOSTS")
 if hosts_env:
     ALLOWED_HOSTS = [h.strip() for h in hosts_env.split(",") if h.strip()]
 else:
-    ALLOWED_HOSTS = ["*", ".onrender.com", "localhost", "127.0.0.1"]
+    ALLOWED_HOSTS = ["*", ".onrender.com", ".instabox.tech", ".instabox.sh", "localhost", "127.0.0.1"]
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -109,6 +119,7 @@ CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
 
 base_trusted = [
+    "https://8000-agq5qlr2uletnjyzudtddvxrdq.instabox.tech",
     "https://*.instabox.tech",
     "https://*.instabox.sh",
     "https://*.onrender.com",

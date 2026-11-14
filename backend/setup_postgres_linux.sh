@@ -70,9 +70,10 @@ pip install -r requirements.txt
 
 # Run migrations against local PostgreSQL
 echo "=========================================================="
-echo " 3. Applying Database Migrations to PostgreSQL..."
+echo " 3. Applying Database Migrations & Static Files..."
 echo "=========================================================="
 python manage.py migrate
+python manage.py collectstatic --no-input || true
 
 # Initialize SuperAdmin
 echo "==> Creating default Super Admin account..."
