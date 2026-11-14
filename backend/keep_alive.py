@@ -31,12 +31,19 @@ print(f"  Ping Interval : {INTERVAL_SECONDS} seconds (1 minute)")
 print("=" * 60)
 
 endpoints = [
+    # 1. Primary Instabox Linux PostgreSQL backend (local + public)
     f"{SERVER_URL}/api/health/",
     f"{SERVER_URL}/api/db-check/",
-    # Maintain Render + Supabase backend active 24/7 so it never sleeps or idles
+    "https://8000-agq5qlr2uletnjyzudtddvxrdq.instabox.tech/api/health/",
+    "https://8000-agq5qlr2uletnjyzudtddvxrdq.instabox.tech/api/db-check/",
+    # 2. Render + Supabase backend (keeps Render and Supabase active 24/7)
     "https://pharma-backend-drjq.onrender.com/api/health/",
     "https://pharma-backend-drjq.onrender.com/api/db-check/",
 ]
+# Remove duplicates if SERVER_URL matches public URL
+endpoints = list(dict.fromkeys(endpoints))
+
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 def ping(url):
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -44,7 +51,10 @@ def ping(url):
     try:
         req = urllib.request.Request(
             url,
-            headers={"User-Agent": "PharmaTrack-KeepAlive/1.0"}
+            headers={
+                "User-Agent": USER_AGENT,
+                "Accept": "application/json, text/plain, */*",
+            }
         )
         with urllib.request.urlopen(req, timeout=15) as resp:
             latency_ms = round((time.time() - start) * 1000, 1)
