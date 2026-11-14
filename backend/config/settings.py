@@ -13,7 +13,7 @@ if env_file.exists():
             line = line.strip()
             if line and not line.startswith("#") and "=" in line:
                 key, val = line.split("=", 1)
-                os.environ.setdefault(key.strip(), val.strip().strip("'\""))
+                os.environ[key.strip()] = val.strip().strip("'\"")
 
 SECRET_KEY = os.environ.get("SECRET_KEY", "django-insecure-pharmacy-attendance-dev-key")
 DEBUG = os.environ.get("DEBUG", "True").lower() in ("true", "1", "yes")
@@ -120,8 +120,11 @@ CORS_ALLOW_CREDENTIALS = True
 
 base_trusted = [
     "https://8000-agq5qlr2uletnjyzudtddvxrdq.instabox.tech",
+    "http://8000-agq5qlr2uletnjyzudtddvxrdq.instabox.tech",
     "https://*.instabox.tech",
+    "http://*.instabox.tech",
     "https://*.instabox.sh",
+    "http://*.instabox.sh",
     "https://*.onrender.com",
     "https://*.vercel.app",
     "http://localhost:5173",
@@ -155,6 +158,7 @@ SIMPLE_JWT = {
 
 # Production Reverse-Proxy & HTTPS Security Settings
 USE_X_FORWARDED_HOST = True
+USE_X_FORWARDED_PORT = True
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = "DENY"
