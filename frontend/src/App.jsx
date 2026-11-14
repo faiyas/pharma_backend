@@ -11,6 +11,14 @@ import ReportExports from './components/ReportExports';
 const RAW_API_BASE = import.meta.env.VITE_API_BASE || '';
 const API_BASE = RAW_API_BASE ? `${RAW_API_BASE.replace(/\/$/, '')}/api` : '/api';
 
+// Log Active Backend URL in DevTools Console
+console.log(
+  `%c[PharmaTrack System] %cActive Backend: %c${API_BASE}`,
+  'background: #0f766e; color: white; padding: 3px 8px; border-radius: 4px; font-weight: bold; font-size: 12px;',
+  'color: #0f766e; font-weight: bold; font-size: 12px;',
+  'color: #0284c7; font-weight: bold; text-decoration: underline; font-size: 12px;'
+);
+
 // Haversine distance calculator in metres
 function calcDistance(lat1, lon1, lat2, lon2) {
   if (lat1 === undefined || lon1 === undefined || lat2 === undefined || lon2 === undefined) return null;
@@ -44,14 +52,53 @@ function formatDate(isoStr) {
   }
 }
 
-// Authenticated API request helper
+// Authenticated API request helper with rich DevTools inspect logging
 async function apiReq(path, opts = {}) {
+  const method = (opts.method || 'GET').toUpperCase();
   const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
   const token = localStorage.getItem('access');
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  const res = await fetch(`${API_BASE}${path}`, { ...opts, headers });
+  const fullUrl = `${API_BASE}${path}`;
+  const startTime = performance.now();
+  let parsedPayload = null;
+  if (opts.body) {
+    try {
+      parsedPayload = JSON.parse(opts.body);
+    } catch {
+      parsedPayload = opts.body;
+    }
+  }
+
+  // Print outgoing API call directly in Inspect Console
+  console.log(
+    `%c[API REQ] %c${method}%c ${path}`,
+    'background: #0284c7; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 11px;',
+    'color: #0284c7; font-weight: bold; font-size: 12px;',
+    'color: #334155; font-weight: 600; font-size: 12px;',
+    parsedPayload
+      ? { url: fullUrl, method, payload: parsedPayload, headers }
+      : { url: fullUrl, method, headers }
+  );
+
+  let res;
+  try {
+    res = await fetch(fullUrl, { ...opts, headers });
+  } catch (netErr) {
+    const elapsed = (performance.now() - startTime).toFixed(1);
+    console.error(
+      `%c[API NETWORK ERROR] %c${method}%c ${path} (${elapsed}ms)`,
+      'background: #dc2626; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 11px;',
+      'color: #dc2626; font-weight: bold; font-size: 12px;',
+      'color: #334155; font-size: 12px;',
+      { url: fullUrl, error: netErr.message }
+    );
+    throw netErr;
+  }
+
+  const elapsed = (performance.now() - startTime).toFixed(1);
   const data = await res.json().catch(() => ({}));
+
   if (!res.ok) {
     let err = data.detail || data.message || data.error;
     if (!err && typeof data === 'object' && Object.keys(data).length > 0) {
@@ -62,8 +109,23 @@ async function apiReq(path, opts = {}) {
     if (!err) {
       err = `Server error (${res.status}: ${res.statusText || 'Request failed'})`;
     }
+    console.error(
+      `%c[API ${res.status}] %c${method}%c ${path} (${elapsed}ms)`,
+      'background: #ef4444; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 11px;',
+      'color: #ef4444; font-weight: bold; font-size: 12px;',
+      'color: #334155; font-size: 12px;',
+      { status: res.status, error: err, response: data }
+    );
     throw new Error(err);
   }
+
+  console.log(
+    `%c[API ${res.status}] %c${method}%c ${path} (${elapsed}ms)`,
+    'background: #16a34a; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 11px;',
+    'color: #16a34a; font-weight: bold; font-size: 12px;',
+    'color: #334155; font-size: 12px;',
+    data
+  );
   return data;
 }
 
@@ -298,7 +360,7 @@ function CameraView({ onCapture, onClear, capturedPhoto }) {
   );
 }
 
-function PasswordInput({ value, onChange, placeholder, required = true, minLength }) {
+function PasswordInput({ value, onChange, placeholder, required = true, minLength, autoComplete = 'current-password' }) {
   const [show, setShow] = useState(false);
   return (
     <div className="password-input-wrap">
@@ -309,6 +371,7 @@ function PasswordInput({ value, onChange, placeholder, required = true, minLengt
         placeholder={placeholder}
         required={required}
         minLength={minLength}
+        autoComplete={autoComplete}
       />
       <button
         type="button"
@@ -438,7 +501,24 @@ export default function App() {
   // Keep-alive heartbeat: ping backend every 60 seconds & on tab focus to keep backend alive
   useEffect(() => {
     const keepAlive = () => {
-      fetch(`${API_BASE}/health/`, { method: 'GET', keepalive: true }).catch(() => {});
+      fetch(`${API_BASE}/health/`, { method: 'GET', keepalive: true })
+        .then((r) => r.json())
+        .then((d) => {
+          console.log(
+            `%c[HEARTBEAT 200] %cBackend active & healthy %c(${new Date().toLocaleTimeString()})`,
+            'background: #0f766e; color: white; padding: 2px 5px; border-radius: 3px; font-weight: bold; font-size: 10px;',
+            'color: #0f766e; font-weight: 600; font-size: 11px;',
+            'color: #94a3b8; font-size: 10px;',
+            d
+          );
+        })
+        .catch((err) => {
+          console.warn(
+            `%c[HEARTBEAT WARNING] %cBackend ping failed: ${err.message}`,
+            'background: #eab308; color: black; padding: 2px 5px; border-radius: 3px; font-weight: bold; font-size: 10px;',
+            'color: #ca8a04; font-size: 11px;'
+          );
+        });
     };
     keepAlive();
     const interval = setInterval(keepAlive, 60000);
@@ -2557,6 +2637,7 @@ export default function App() {
                       required
                       minLength={8}
                       placeholder="Minimum 8 characters"
+                      autoComplete="new-password"
                       value={newManagerPass}
                       onChange={(e) => setNewManagerPass(e.target.value)}
                     />

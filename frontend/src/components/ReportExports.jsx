@@ -40,6 +40,13 @@ export default function ReportExports({ user, shops, addToast, apiReq }) {
       if (selectedBranch) params.append('shop_id', selectedBranch);
 
       const url = `${API_BASE}/reports/export/?${params.toString()}`;
+      console.log(
+        `%c[API REQ] %cGET%c /reports/export/?${params.toString()}`,
+        'background: #0284c7; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 11px;',
+        'color: #0284c7; font-weight: bold; font-size: 12px;',
+        'color: #334155; font-weight: 600; font-size: 12px;',
+        { url, format: exportFormat, report_type: reportType }
+      );
 
       const res = await fetch(url, {
         headers: {
@@ -48,8 +55,10 @@ export default function ReportExports({ user, shops, addToast, apiReq }) {
       });
 
       if (!res.ok) {
+        console.error(`%c[API ${res.status}] %cGET%c /reports/export/`, 'background: #ef4444; color: white; padding: 2px 6px; border-radius: 4px;', 'color: #ef4444; font-weight: bold;', '', { status: res.status });
         throw new Error(`Report generation failed (${res.status})`);
       }
+      console.log(`%c[API 200] %cGET%c /reports/export/ (Blob Download)`, 'background: #16a34a; color: white; padding: 2px 6px; border-radius: 4px;', 'color: #16a34a; font-weight: bold;', '');
 
       const blob = await res.blob();
       const downloadUrl = window.URL.createObjectURL(blob);
